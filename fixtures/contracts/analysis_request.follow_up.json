@@ -1,0 +1,7 @@
+{
+  "version": "v1",
+  "query": "继续展开一下这个指标同比变化的原因。",
+  "query_mode": "follow_up",
+  "session_id": "sess_stub",
+  "include_trace": true
+}

@@ -1,0 +1,3 @@
+retrieval:
+  default_mode: mock
+  fixture_root: fixtures/retrieval

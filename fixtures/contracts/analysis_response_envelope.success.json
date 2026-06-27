@@ -1,0 +1,30 @@
+{
+  "version": "v1",
+  "session_id": "sess_stub",
+  "turn_id": "turn_stub",
+  "response": {
+    "version": "v1",
+    "response_type": "success",
+    "session_id": "sess_stub",
+    "summary": "占位分析结果：宁德时代 2024 年净利润是多少？",
+    "report_blocks": [],
+    "uncertainty_notes": [],
+    "next_actions": []
+  },
+  "trace_blocks": [
+    {
+      "version": "v1",
+      "block_type": "routing",
+      "title": "路由结果",
+      "status": "success",
+      "payload_summary": {
+        "intent": "metric_lookup",
+        "follow_up_type": "none",
+        "query_mode": "first_turn"
+      },
+      "raw_refs": [
+        "metric_lookup"
+      ]
+    }
+  ]
+}

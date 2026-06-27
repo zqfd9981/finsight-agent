@@ -1,0 +1,4 @@
+app:
+  name: finsight-agent
+  version: v1
+  mode: skeleton

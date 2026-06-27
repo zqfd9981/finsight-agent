@@ -1,0 +1,9 @@
+{
+  "version": "v1",
+  "response_type": "success",
+  "session_id": "sess_001",
+  "summary": "这里是 metric_lookup 快路径的占位成功响应。",
+  "report_blocks": [],
+  "uncertainty_notes": [],
+  "next_actions": []
+}

@@ -1,0 +1,17 @@
+{
+  "version": "v1",
+  "intent": "metric_lookup",
+  "follow_up_type": "none",
+  "confidence": "high",
+  "entities": {
+    "company": "宁德时代",
+    "metric": "net_profit",
+    "time_scope": "2024_annual"
+  },
+  "needs": [
+    "structured_data_query"
+  ],
+  "constraints": {
+    "preferred_output": "brief_answer"
+  }
+}

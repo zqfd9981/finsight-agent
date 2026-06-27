@@ -1,0 +1,18 @@
+{
+  "version": "v1",
+  "plan_id": "plan_002",
+  "intent": "metric_lookup",
+  "stages": [
+    "query_structured_data",
+    "synthesize_brief_answer"
+  ],
+  "stage_constraints": {
+    "query_structured_data": {
+      "time_hint": "2024_annual"
+    },
+    "synthesize_brief_answer": {
+      "preferred_output": "brief_answer"
+    }
+  },
+  "response_mode": "brief_answer"
+}
