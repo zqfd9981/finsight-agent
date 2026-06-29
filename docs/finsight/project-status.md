@@ -1,6 +1,6 @@
 # FinSight V1 项目状态文档
 
-日期：2026-06-27
+日期：2026-06-29
 状态：骨架已落地，准备进入首条业务快路径实现
 
 ## 1. 使用说明
@@ -22,7 +22,7 @@
 
 | 模块群 | 覆盖 spec | 当前 owner | 当前状态 | 主要依赖 | 当前 blocker | 当前里程碑 | 完成定义 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 控制面 | routing/planning、session、orchestration | 待分配 | 进行中 | shared contracts、API boundary | orchestrator 与 session 真实链路尚未实现 | Control Plane Mock Ready | `RouterResult`、`Plan` mock 已可产出，且可被统一 API 边界消费 |
+| 控制面 | routing/planning、session、orchestration | 待分配 | 进行中 | shared contracts、API boundary | orchestrator 与 session 真实链路尚未实现 | Control Plane Semantic Routing Ready | `RouterResult`、`Plan` 已可按规则产出，且可被统一 API 边界消费 |
 | 数据与证据面 | structured market data、retrieval | 待分配 | 进行中 | shared contracts、控制面输入 mock | 真实结构化数据源与 retrieval 链路尚未接入 | Evidence Ready | metric_lookup 占位查询可返回稳定结构，后续再接真实数据与证据 |
 | 呈现与评测面 | response/evaluation、workbench | 待分配 | 进行中 | shared contracts、API boundary、response fixtures | workbench 页面展示仍是入口骨架，未进入真实交互实现 | Response Ready | `FinalResponse`、`TraceBlock`、API envelope 已冻结且可通过骨架测试验证 |
 
@@ -33,7 +33,7 @@
 | `project-implementation-architecture` | 全局底座 | 待分配 | 完成 | 无 | 无 | Architecture Ready | `frontend + backend + shared` 骨架已落地并通过测试 |
 | `shared-analysis-contracts` | 全局底座 | 待分配 | 完成 | 无 | 无 | Contract Ready | 顶层 `shared/contracts`、fixtures 与中文字段注释已落地 |
 | `workbench-backend-api-boundary` | 全局底座 | 待分配 | 完成 | shared contracts | 无 | API Boundary Ready | 统一请求/响应 contract、后端入口壳、前端 client 骨架已落地 |
-| `semantic-routing-and-planning` | 控制面 | 待分配 | 进行中 | `SessionContext`、shared contracts、API boundary | 仅有 metric_lookup 的 mock 路由与最小 plan，未接真实规则 | Control Plane Mock Ready | 能输出稳定 `RouterResult` 和 `Plan` mock，并作为首条快路径入口 |
+| `semantic-routing-and-planning` | 控制面 | 待分配 | 进行中 | `SessionContext`、shared contracts、API boundary | 真实 session context 仍未接入，当前 follow-up 仍基于轻量规则 | Control Plane Semantic Routing Ready | 能输出稳定 `RouterResult` 和 `Plan` 规则结果，并作为首条快路径入口 |
 | `conversation-session-state` | 控制面 | 待分配 | 未开始 | shared contracts | 会话持久化与压缩逻辑尚未实现 | Control Plane Mock Ready | 能输出压缩后的 `SessionContext` mock |
 | `event-analysis-orchestration` | 控制面 | 待分配 | 未开始 | `Plan`、structured output、retrieval output | 输入输出 contract 已冻结，但真实 orchestrator 未开工 | Control Plane Mock Ready | 能消费 mock `Plan` 并产出 mock `StageObservation` |
 | `structured-market-data-support` | 数据与证据面 | 待分配 | 进行中 | router/planner 输出 | 当前仅有 metric_lookup 占位查询，未接真实数据源 | Evidence Ready | 能返回首条 metric_lookup 快路径所需的稳定结构化结果 |
@@ -83,9 +83,10 @@
 | --- | --- | --- |
 | M1 Contract Ready | 共享对象定义稳定 | 已完成：shared contracts、fixtures、字段注释和 API boundary contract 已落地 |
 | M2 Control Plane Mock Ready | 控制面可先行联调 | 已完成：`RouterResult`、`Plan` mock 与 API boundary 骨架可用 |
+| M2.5 Control Plane Semantic Routing Ready | 控制面进入首版规则联调 | 已完成：router/planner 已覆盖长短路径与 follow-up 规则，并接入统一 API trace |
 | M3 Evidence Ready | 数据与证据面产出可被消费 | 进行中：metric_lookup 占位查询可返回稳定结构，但 retrieval 未启动 |
 | M4 Response Ready | 响应层 contract 稳定 | 已完成：`FinalResponse`、`TraceBlock`、guardrail response 与 envelope 骨架可用 |
-| M5 Demo Ready | 首轮分析和一轮追问跑通 | 未开始：待新建并实现首条真实 `metric_lookup` 快路径 |
+| M5 Demo Ready | 首轮分析和一轮追问跑通 | 进行中：控制面已完成规则实现，待结构化数据与结果呈现继续接入 |
 
 ## 6. 更新规则
 
@@ -121,6 +122,10 @@
   - 后端适配层：`backend/src/finsight_agent/workbench_backend_api/service.py`
   - 前端 API client：`frontend/streamlit_app/api_client.py`
   - API boundary fixtures 与测试已通过
+- 已完成的新增进展：
+  - `semantic-routing-and-planning` 已实现 `metric_lookup`、`event_impact_analysis`、`evidence_lookup`、`out_of_scope`
+  - follow-up 已实现 `none`、`drilldown`、`compare`、`redirect` 的首版判别
+  - planner 已实现 metric 快路径、event 四阶段长路径、evidence 缩减路径以及 guardrail 计划
 - 尚未开始的真实业务实现：
   - session 持久化
   - orchestrator 主链路

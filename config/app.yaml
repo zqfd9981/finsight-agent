@@ -2,3 +2,8 @@ app:
   name: finsight-agent
   version: v1
   mode: skeleton
+  control_plane:
+    root: backend/src/finsight_agent/control_plane
+    prompts:
+      router_system_prompt_path: router/prompts/system.txt
+      planner_system_prompt_path: planner/prompts/system.txt
