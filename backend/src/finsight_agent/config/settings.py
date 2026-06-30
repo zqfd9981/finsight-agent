@@ -31,6 +31,7 @@ class RetrievalSettings:
     raw_filings_root: Path
     parsed_filings_root: Path
     chunked_filings_root: Path
+    retrieval_index_root: Path
     status_root: Path
     default_pilot_company_count: int = 10
     primary_parser_name: str = "mineru"
@@ -91,6 +92,10 @@ def load_settings() -> AppSettings:
             chunked_filings_root=_resolve_path(
                 repo_root,
                 _require_text(retrieval_config, "chunked_filings_root"),
+            ),
+            retrieval_index_root=_resolve_path(
+                repo_root,
+                _require_text(retrieval_config, "retrieval_index_root"),
             ),
             status_root=_resolve_path(
                 repo_root,

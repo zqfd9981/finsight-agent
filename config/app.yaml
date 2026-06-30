@@ -12,6 +12,7 @@ app:
     raw_filings_root: var/data/raw_filings
     parsed_filings_root: var/data/parsed_filings
     chunked_filings_root: var/data/chunked_filings
+    retrieval_index_root: var/data/retrieval_index
     status_root: var/data/corpus_status
     default_pilot_company_count: 10
     primary_parser_name: mineru

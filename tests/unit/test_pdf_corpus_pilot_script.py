@@ -61,6 +61,7 @@ class PdfCorpusPilotScriptTest(unittest.TestCase):
                     raw_filings_root=Path("var/data/raw_filings"),
                     parsed_filings_root=Path("var/data/parsed_filings"),
                     chunked_filings_root=Path("var/data/chunked_filings"),
+                    retrieval_index_root=Path("var/data/retrieval_index"),
                     status_root=Path("var/data/corpus_status"),
                     default_pilot_company_count=8,
                 )
