@@ -10,5 +10,10 @@ app:
   retrieval:
     manifest_path: var/data/corpus_manifests/semiconductor_sample_universe.yaml
     raw_filings_root: var/data/raw_filings
+    parsed_filings_root: var/data/parsed_filings
+    chunked_filings_root: var/data/chunked_filings
     status_root: var/data/corpus_status
     default_pilot_company_count: 10
+    primary_parser_name: mineru
+    parent_target_chars: 2000
+    child_target_chars: 500

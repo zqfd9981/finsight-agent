@@ -29,8 +29,13 @@ class RetrievalSettings:
 
     manifest_path: Path
     raw_filings_root: Path
+    parsed_filings_root: Path
+    chunked_filings_root: Path
     status_root: Path
     default_pilot_company_count: int = 10
+    primary_parser_name: str = "mineru"
+    parent_target_chars: int = 2000
+    child_target_chars: int = 500
 
 
 @dataclass(slots=True)
@@ -79,6 +84,14 @@ def load_settings() -> AppSettings:
                 repo_root,
                 _require_text(retrieval_config, "raw_filings_root"),
             ),
+            parsed_filings_root=_resolve_path(
+                repo_root,
+                _require_text(retrieval_config, "parsed_filings_root"),
+            ),
+            chunked_filings_root=_resolve_path(
+                repo_root,
+                _require_text(retrieval_config, "chunked_filings_root"),
+            ),
             status_root=_resolve_path(
                 repo_root,
                 _require_text(retrieval_config, "status_root"),
@@ -86,6 +99,18 @@ def load_settings() -> AppSettings:
             default_pilot_company_count=_require_int(
                 retrieval_config,
                 "default_pilot_company_count",
+            ),
+            primary_parser_name=_require_text(
+                retrieval_config,
+                "primary_parser_name",
+            ),
+            parent_target_chars=_require_int(
+                retrieval_config,
+                "parent_target_chars",
+            ),
+            child_target_chars=_require_int(
+                retrieval_config,
+                "child_target_chars",
             ),
         ),
     )

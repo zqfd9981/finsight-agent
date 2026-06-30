@@ -59,6 +59,8 @@ class PdfCorpusPilotScriptTest(unittest.TestCase):
                 "retrieval": RetrievalSettings(
                     manifest_path=Path("var/data/corpus_manifests/semiconductor_sample_universe.yaml"),
                     raw_filings_root=Path("var/data/raw_filings"),
+                    parsed_filings_root=Path("var/data/parsed_filings"),
+                    chunked_filings_root=Path("var/data/chunked_filings"),
                     status_root=Path("var/data/corpus_status"),
                     default_pilot_company_count=8,
                 )
