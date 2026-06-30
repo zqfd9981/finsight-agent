@@ -63,6 +63,16 @@ class PdfCorpusPilotScriptTest(unittest.TestCase):
                     chunked_filings_root=Path("var/data/chunked_filings"),
                     retrieval_index_root=Path("var/data/retrieval_index"),
                     status_root=Path("var/data/corpus_status"),
+                    dense=type(
+                        "FakeDenseSettings",
+                        (),
+                        {
+                            "qdrant_collection_name": "finsight_pdf_chunks_v1",
+                            "embedding_model_name": "bge-m3",
+                            "embedding_model_version": "bge-m3-v1",
+                            "qdrant_path": Path("var/data/qdrant"),
+                        },
+                    )(),
                     default_pilot_company_count=8,
                 )
             },
