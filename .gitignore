@@ -31,6 +31,7 @@ build/
 # 本地开发与辅助产物
 .codex/
 visual/
+runtime/
 
 # 根目录临时说明与可视化文件
 /9个Specs关系图.html
