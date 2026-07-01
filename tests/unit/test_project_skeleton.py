@@ -67,6 +67,10 @@ class ProjectSkeletonTest(unittest.TestCase):
             "shared/enums/stage_name.py",
             "backend/src/finsight_agent/control_plane/router/service.py",
             "backend/src/finsight_agent/control_plane/planner/service.py",
+            "backend/src/finsight_agent/control_plane/session/models.py",
+            "backend/src/finsight_agent/control_plane/session/repository.py",
+            "backend/src/finsight_agent/control_plane/session/service.py",
+            "backend/src/finsight_agent/control_plane/session/extractor.py",
             "backend/src/finsight_agent/capabilities/structured_data/service.py",
             "backend/src/finsight_agent/capabilities/reporting/service.py",
             "backend/src/finsight_agent/workbench_backend_api/service.py",
@@ -90,6 +94,7 @@ class ProjectSkeletonTest(unittest.TestCase):
     def test_contract_and_backend_modules_can_be_imported(self) -> None:
         """校验共享 contract 与后端最小服务骨架可以被稳定导入。"""
         from finsight_agent.control_plane.router.service import RouterService
+        from finsight_agent.control_plane.session.service import SessionService
         from finsight_agent.workbench_backend_api.service import WorkbenchBackendApiService
         from shared.contracts.analysis_request import AnalysisRequest
         from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
@@ -122,12 +127,12 @@ class ProjectSkeletonTest(unittest.TestCase):
             RouterService().build_metric_lookup_stub().intent,
             Intent.METRIC_LOOKUP.value,
         )
-        self.assertEqual(
+        self.assertTrue(
             WorkbenchBackendApiService().build_response(
                 AnalysisRequest(query="宁德时代 2024 年净利润是多少？")
-            ).response.session_id,
-            "sess_stub",
+            ).response.session_id.startswith("sess_")
         )
+        self.assertTrue(hasattr(SessionService(), "load_context"))
 
     def test_orchestrator_modules_can_be_imported(self) -> None:
         """校验 orchestrator 首版模块可以被稳定导入。"""

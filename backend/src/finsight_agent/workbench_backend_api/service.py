@@ -7,35 +7,55 @@ from shared.contracts.trace_block import TraceBlock
 from finsight_agent.control_plane.orchestrator.service import OrchestratorService
 from finsight_agent.control_plane.planner.service import PlannerService
 from finsight_agent.control_plane.router.service import RouterService
+from finsight_agent.control_plane.session.service import SessionService
 
 
 class WorkbenchBackendApiService:
     """统一分析入口，负责串起 route -> plan -> orchestrate。"""
 
-    def __init__(self) -> None:
-        self._router_service = RouterService()
-        self._planner_service = PlannerService()
-        self._orchestrator_service = OrchestratorService()
+    def __init__(
+        self,
+        *,
+        router_service: RouterService | None = None,
+        planner_service: PlannerService | None = None,
+        orchestrator_service: OrchestratorService | None = None,
+        session_service: SessionService | None = None,
+    ) -> None:
+        self._router_service = router_service or RouterService()
+        self._planner_service = planner_service or PlannerService()
+        self._orchestrator_service = orchestrator_service or OrchestratorService()
+        self._session_service = session_service or SessionService()
 
     def build_response(self, request: AnalysisRequest) -> AnalysisResponseEnvelope:
-        session_id = request.session_id or "sess_stub"
+        session_id = request.session_id or self._build_session_id()
+        session_context = self._session_service.load_context(request.session_id)
         router_result = self._router_service.route(
             query=request.query,
-            session_context=None,
+            session_context=session_context,
         )
         plan = self._planner_service.build_plan(router_result)
+        normalized_request = AnalysisRequest(
+            query=request.query,
+            query_mode=request.query_mode,
+            session_id=session_id,
+            include_trace=request.include_trace,
+            notes=request.notes,
+        )
         orchestration_result = self._orchestrator_service.execute(
-            request=AnalysisRequest(
-                query=request.query,
-                query_mode=request.query_mode,
-                session_id=session_id,
-                include_trace=request.include_trace,
-                notes=request.notes,
-            ),
+            request=normalized_request,
             router_result=router_result,
             plan=plan,
-            session_context=None,
+            session_context=session_context,
         )
+
+        snapshot = self._session_service.build_snapshot(
+            request=normalized_request,
+            router_result=router_result,
+            plan=plan,
+            orchestration_result=orchestration_result,
+        )
+        if snapshot is not None:
+            self._session_service.save_snapshot(snapshot)
 
         trace_blocks: list[TraceBlock] = []
         if request.include_trace:
@@ -78,3 +98,8 @@ class WorkbenchBackendApiService:
             response=response,
             trace_blocks=trace_blocks,
         )
+
+    def _build_session_id(self) -> str:
+        import uuid
+
+        return f"sess_{uuid.uuid4().hex[:8]}"
