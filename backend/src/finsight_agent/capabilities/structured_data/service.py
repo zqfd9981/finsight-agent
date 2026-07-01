@@ -54,6 +54,31 @@ class StructuredDataService:
             )
             return self._to_stage_payload(result)
 
+        if query.allow_external_fallback:
+            external_result = self._external_provider.lookup_metric(
+                company_name=company,
+                metric_name=metric,
+                time_scope=time_scope,
+            )
+            if external_result is not None:
+                external_result = dict(external_result)
+                external_result["company"] = str(
+                    external_result.get("company_name", company)
+                )
+                external_result["metric"] = str(
+                    external_result.get("metric_name", metric)
+                )
+                external_result["time_scope"] = str(
+                    external_result.get("time_scope", time_scope)
+                )
+                external_notes = [
+                    str(item) for item in external_result.get("notes", [])
+                ]
+                external_result["notes"] = external_notes + [
+                    "结果来自外部指标接口，非本地财报抽取"
+                ]
+                return external_result
+
         degraded = MetricLookupResult.degraded(
             company_name=company,
             metric_name=metric,

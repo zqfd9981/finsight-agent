@@ -18,6 +18,32 @@ from finsight_agent.capabilities.structured_data.repository import MetricReposit
 from finsight_agent.capabilities.structured_data.service import StructuredDataService
 
 
+class _StubExternalMetricProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    def lookup_metric(
+        self,
+        company_name: str,
+        metric_name: str,
+        time_scope: str,
+    ) -> dict[str, object] | None:
+        self.calls.append((company_name, metric_name, time_scope))
+        return {
+            "company_name": company_name,
+            "metric_name": metric_name,
+            "time_scope": time_scope,
+            "value": "520.01",
+            "unit": "亿元",
+            "source_type": "external_api",
+            "source_summary": "stub_external_provider",
+            "matched_by": "external_provider",
+            "confidence": "medium",
+            "is_degraded": False,
+            "notes": ["结果来自外部指标接口"],
+        }
+
+
 class StructuredDataServiceTest(unittest.TestCase):
     def test_query_metric_lookup_reads_local_metric_record_first(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -68,6 +94,26 @@ class StructuredDataServiceTest(unittest.TestCase):
         self.assertTrue(result["is_degraded"])
         self.assertEqual(result["value"], "")
         self.assertIn("当前未找到对应指标数据", result["notes"])
+
+    def test_query_metric_lookup_uses_external_provider_after_local_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider = _StubExternalMetricProvider()
+            service = StructuredDataService(
+                metric_repository=MetricRepository(storage_dir=temp_dir),
+                external_provider=provider,
+            )
+
+            result = service.query_metric_lookup(
+                company="宁德时代",
+                metric="revenue",
+                time_scope="2025_annual",
+            )
+
+        self.assertEqual(result["source_type"], "external_api")
+        self.assertEqual(
+            provider.calls,
+            [("宁德时代", "revenue", "2025_annual")],
+        )
 
 
 if __name__ == "__main__":
