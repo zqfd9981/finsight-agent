@@ -21,8 +21,8 @@ from finsight_agent.capabilities.retrieval.models import (
 )
 from finsight_agent.control_plane.orchestrator.models import StageExecutionResult
 from shared.contracts.analysis_request import AnalysisRequest
-from shared.contracts.router_result import RouterResult
 from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
+from shared.contracts.router_result import RouterResult
 
 
 class _StubStructuredDataService:
@@ -228,6 +228,46 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(
             facade.calls[0]["raw_query"],
             "给我证据 红海事件对航运运价有影响 航运股",
+        )
+
+    def test_retrieve_evidence_stage_consumes_execution_state_context_in_order(self) -> None:
+        from finsight_agent.control_plane.orchestrator.stage_runners.retrieve_evidence import (
+            run_retrieve_evidence_stage,
+        )
+
+        retrieval_result = _build_retrieval_result()
+        facade = _StubRetrievalFacade(retrieval_result)
+        execution_state = {
+            "collect_event_context": StageExecutionResult(
+                stage_name="collect_event_context",
+                status="success",
+                output_payload={
+                    "event_context": {
+                        "event": "红海事件",
+                        "themes": ["航运", "能源", "航运"],
+                        "time_scope": "2024Q1",
+                    }
+                },
+            ),
+            "analyze_targets": {
+                "target_scope": ["港口", "航运", "港口"],
+            },
+        }
+        run_retrieve_evidence_stage(
+            request=_build_request(query="分析红海风险"),
+            router_result=_build_router_result(
+                intent="event_impact_analysis",
+                entities={"target": "港口"},
+            ),
+            stage_constraints={"retrieval_budget": 4},
+            execution_state=execution_state,
+            retrieval_facade=facade,
+        )
+
+        self.assertEqual(len(facade.calls), 1)
+        self.assertEqual(
+            facade.calls[0]["raw_query"],
+            "分析红海风险 红海事件 航运 能源 2024Q1 港口",
         )
 
     def test_retrieve_evidence_stage_prefers_stage_target_and_uses_event_context_in_order(self) -> None:
