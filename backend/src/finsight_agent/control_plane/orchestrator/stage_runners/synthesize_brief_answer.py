@@ -23,7 +23,16 @@ def run_synthesize_brief_answer_stage(
     metric = str(structured_result.get("metric", "")).strip()
     time_scope = str(structured_result.get("time_scope", "")).strip()
     value = str(structured_result.get("value", "")).strip()
-    summary = f"{company}{time_scope}{metric}为{value}。"
+    is_degraded = bool(structured_result.get("is_degraded", False))
+    notes = [str(item) for item in structured_result.get("notes", [])]
+
+    if is_degraded:
+        note_text = "；".join(notes) if notes else "当前未找到对应指标数据。"
+        summary = f"{company}{time_scope}{metric}暂未命中结构化数据。{note_text}"
+    else:
+        unit = str(structured_result.get("unit", "")).strip()
+        summary = f"{company}{time_scope}{metric}为{value}{unit}。"
+
     final_response = reporting_service.build_brief_response(
         session_id=request.session_id or "",
         summary=summary,
