@@ -21,7 +21,7 @@ from finsight_agent.control_plane.orchestrator.observation_builder import (
 )
 
 
-class OrchestratorServiceTest(unittest.TestCase):
+class OrchestratorModelsTest(unittest.TestCase):
     def test_stage_execution_result_exposes_expected_fields(self) -> None:
         result = StageExecutionResult(
             stage_name="retrieve_evidence",
