@@ -19,6 +19,7 @@ from shared.contracts.final_response import FinalResponse
 from shared.contracts.plan import Plan
 from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
 from shared.contracts.router_result import RouterResult
+from shared.contracts.session_context import SessionContext
 
 
 class SessionContextExtractorTest(unittest.TestCase):
@@ -219,6 +220,124 @@ class SessionContextExtractorTest(unittest.TestCase):
             context.key_evidence_refs,
             ["ev_001", "ev_002", "ev_003", "ev_004", "ev_005"],
         )
+
+    def test_extractor_merges_previous_history_summary_into_rolling_summary(self) -> None:
+        request = AnalysisRequest(
+            query="继续展开一下同比变化原因。",
+            query_mode="follow_up",
+            session_id="sess_roll",
+        )
+        router_result = RouterResult(
+            intent="evidence_lookup",
+            follow_up_type="drilldown",
+            confidence="high",
+            entities={
+                "target": "宁德时代",
+                "claim": "宁德时代净利润同比变化原因",
+            },
+            needs=["rag_retrieval"],
+            constraints={"preferred_output": "report"},
+        )
+        plan = Plan(
+            plan_id="plan_evidence_lookup_v1",
+            intent="evidence_lookup",
+            stages=["retrieve_evidence", "synthesize_report"],
+            stage_constraints={},
+            response_mode="report",
+        )
+        orchestration_result = OrchestrationResult(
+            session_id="sess_roll",
+            router_result=router_result,
+            plan=plan,
+            final_response=FinalResponse(
+                response_type="report",
+                session_id="sess_roll",
+                summary="已检索到 1 条证据，可用于继续研判。",
+                report_blocks=[
+                    EvidenceOverviewBlock(
+                        block_type="evidence_overview",
+                        title="证据概览",
+                        items=[
+                            EvidenceOverviewItem(
+                                evidence_id="ev_009",
+                                excerpt="动力电池需求回暖带动盈利改善。",
+                                company_name="宁德时代",
+                                doc_type="annual_report",
+                            )
+                        ],
+                    )
+                ],
+            ),
+        )
+        previous_context = SessionContext(
+            session_id="sess_roll",
+            active_topic="宁德时代 2024_annual net_profit",
+            active_candidates=["宁德时代"],
+            history_summary="上一轮已完成宁德时代 2024 年净利润查询，并返回结构化简答。",
+            available_follow_ups=["drilldown", "expand"],
+        )
+
+        context = self.extractor.extract(
+            request=request,
+            router_result=router_result,
+            plan=plan,
+            orchestration_result=orchestration_result,
+            previous_context=previous_context,
+        )
+
+        self.assertIn("上一轮已完成宁德时代 2024 年净利润查询", context.history_summary)
+        self.assertIn("已围绕宁德时代净利润同比变化原因继续展开", context.history_summary)
+
+    def test_extractor_caps_rolling_summary_length(self) -> None:
+        request = AnalysisRequest(
+            query="继续展开证据。",
+            query_mode="follow_up",
+            session_id="sess_roll_limit",
+        )
+        router_result = RouterResult(
+            intent="evidence_lookup",
+            follow_up_type="expand",
+            confidence="high",
+            entities={
+                "target": "中远海能",
+                "claim": "中远海能受益逻辑补充",
+            },
+            needs=["rag_retrieval"],
+            constraints={"preferred_output": "report"},
+        )
+        plan = Plan(
+            plan_id="plan_evidence_lookup_v1",
+            intent="evidence_lookup",
+            stages=["retrieve_evidence", "synthesize_report"],
+            stage_constraints={},
+            response_mode="report",
+        )
+        orchestration_result = OrchestrationResult(
+            session_id="sess_roll_limit",
+            router_result=router_result,
+            plan=plan,
+            final_response=FinalResponse(
+                response_type="report",
+                session_id="sess_roll_limit",
+                summary="已检索到 1 条证据。",
+                report_blocks=[],
+            ),
+        )
+        previous_context = SessionContext(
+            session_id="sess_roll_limit",
+            history_summary="上一轮已完成非常长的摘要" * 20,
+        )
+
+        context = self.extractor.extract(
+            request=request,
+            router_result=router_result,
+            plan=plan,
+            orchestration_result=orchestration_result,
+            previous_context=previous_context,
+        )
+
+        self.assertLessEqual(len(context.history_summary), 120)
+        self.assertIn("上一轮已围绕中远海能受益逻辑补充继续展开", context.history_summary)
 
     def _build_stage_observation_result(self, evidence_refs: list[str]) -> object:
         return type(

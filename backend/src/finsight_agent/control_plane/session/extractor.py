@@ -24,6 +24,7 @@ class SessionContextExtractor:
         router_result: RouterResult,
         plan: Plan,
         orchestration_result: OrchestrationResult,
+        previous_context: SessionContext | None = None,
     ) -> SessionContext:
         del request, plan
 
@@ -43,6 +44,7 @@ class SessionContextExtractor:
             active_topic=active_topic,
             active_candidates=active_candidates,
             has_evidence_refs=bool(key_evidence_refs),
+            previous_summary=(previous_context.history_summary if previous_context else ""),
         )
 
         return SessionContext(

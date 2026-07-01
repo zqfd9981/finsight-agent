@@ -252,6 +252,34 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             "宁德时代 2024_annual net_profit",
         )
 
+    def test_workbench_persists_rolling_summary_after_follow_up(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = SessionRepository(storage_dir=temp_dir)
+            session_service = SessionService(repository=repository)
+            service = WorkbenchBackendApiService(
+                router_service=RecordingRouterService(),
+                planner_service=StubPlannerService(),
+                orchestrator_service=StubOrchestratorService(),
+                session_service=session_service,
+            )
+
+            first_turn = service.build_response(
+                AnalysisRequest(query="宁德时代 2024 年净利润是多少？")
+            )
+            service.build_response(
+                AnalysisRequest(
+                    query="继续展开一下同比变化原因。",
+                    query_mode="follow_up",
+                    session_id=first_turn.session_id,
+                )
+            )
+            loaded = repository.load(first_turn.session_id)
+
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertIn("上一轮已完成宁德时代 2024 年净利润查询", loaded.context.history_summary)
+        self.assertIn("已围绕中远海能受益逻辑继续展开", loaded.context.history_summary)
+
     def test_workbench_degrades_when_session_snapshot_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = SessionRepository(storage_dir=temp_dir)
