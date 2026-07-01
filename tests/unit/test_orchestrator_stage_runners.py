@@ -196,7 +196,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertIn("宁德时代", final_response.summary)
         self.assertIn("123.45", final_response.summary)
 
-    def test_retrieve_evidence_stage_returns_retrieval_result_and_refs(self) -> None:
+    def test_retrieve_evidence_stage_builds_query_from_request_claim_and_target(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.retrieve_evidence import (
             run_retrieve_evidence_stage,
         )
@@ -204,13 +204,16 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         retrieval_result = _build_retrieval_result()
         facade = _StubRetrievalFacade(retrieval_result)
         result = run_retrieve_evidence_stage(
-            request=_build_request(query="红海事件有哪些证据？"),
+            request=_build_request(query="给我证据"),
             router_result=_build_router_result(
                 intent="evidence_lookup",
-                entities={"target": "航运"},
+                entities={
+                    "target": "航运",
+                    "claim": "红海事件对航运运价有影响",
+                },
                 constraints={"retrieval_budget": 3},
             ),
-            stage_constraints={"retrieval_budget": 3, "target": "航运"},
+            stage_constraints={"retrieval_budget": 3, "target": "航运股"},
             execution_state={},
             retrieval_facade=facade,
         )
@@ -219,18 +222,34 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertIs(result.output_payload["retrieval_result"], retrieval_result)
         self.assertEqual(result.evidence_refs, ["evd_001"])
-        self.assertEqual(
-            facade.calls,
-            [
-                {
-                    "raw_query": "红海事件有哪些证据？",
-                    "limit": 3,
-                    "company_code": None,
-                    "doc_type": None,
-                    "report_year": None,
-                }
-            ],
+        self.assertEqual(len(facade.calls), 1)
+        self.assertEqual(facade.calls[0]["limit"], 3)
+        self.assertIn("给我证据", str(facade.calls[0]["raw_query"]))
+        self.assertIn("红海事件对航运运价有影响", str(facade.calls[0]["raw_query"]))
+        self.assertIn("航运股", str(facade.calls[0]["raw_query"]))
+
+    def test_retrieve_evidence_stage_falls_back_to_router_target_when_stage_target_missing(self) -> None:
+        from finsight_agent.control_plane.orchestrator.stage_runners.retrieve_evidence import (
+            run_retrieve_evidence_stage,
         )
+
+        retrieval_result = _build_retrieval_result()
+        facade = _StubRetrievalFacade(retrieval_result)
+        run_retrieve_evidence_stage(
+            request=_build_request(query="继续找相关证据"),
+            router_result=_build_router_result(
+                intent="evidence_lookup",
+                entities={"target": "出海服务"},
+            ),
+            stage_constraints={"retrieval_budget": 2},
+            execution_state={},
+            retrieval_facade=facade,
+        )
+
+        self.assertEqual(len(facade.calls), 1)
+        self.assertEqual(facade.calls[0]["limit"], 2)
+        self.assertIn("继续找相关证据", str(facade.calls[0]["raw_query"]))
+        self.assertIn("出海服务", str(facade.calls[0]["raw_query"]))
 
     def test_synthesize_report_stage_builds_report_response_from_retrieval_result(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_report import (
@@ -266,6 +285,10 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertTrue(final_response.report_blocks)
         self.assertEqual(final_response.report_blocks[0]["block_type"], "evidence_overview")
         self.assertIn("已检索到", final_response.summary)
+        first_item = final_response.report_blocks[0]["items"][0]
+        self.assertEqual(first_item["evidence_id"], "evd_001")
+        self.assertEqual(first_item["excerpt"], "运价指数在相关期间明显波动。")
+        self.assertEqual(first_item["company_name"], "示例公司")
         self.assertEqual(result.evidence_refs, ["evd_001"])
 
     def test_build_report_response_returns_minimal_final_response(self) -> None:
@@ -277,7 +300,14 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
                 {
                     "block_type": "evidence_overview",
                     "title": "证据概览",
-                    "items": ["证据 1"],
+                    "items": [
+                        {
+                            "evidence_id": "evd_001",
+                            "excerpt": "证据 1",
+                            "company_name": "示例公司",
+                            "doc_type": "annual_report",
+                        }
+                    ],
                 }
             ],
             uncertainty_notes=["证据数量有限"],
@@ -290,6 +320,23 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(result.report_blocks[0]["block_type"], "evidence_overview")
         self.assertEqual(result.uncertainty_notes, ["证据数量有限"])
         self.assertEqual(result.next_actions, ["可继续追问更具体时间段"])
+
+    def test_build_report_response_rejects_invalid_evidence_overview_block(self) -> None:
+        service = ReportingService()
+
+        with self.assertRaises(ValueError):
+            service.build_report_response(
+                session_id="sess_invalid",
+                summary="已检索到 1 条证据。",
+                report_blocks=[
+                    {
+                        "block_type": "evidence_overview",
+                        "title": "证据概览",
+                    }
+                ],
+                uncertainty_notes=[],
+                next_actions=[],
+            )
 
 
 if __name__ == "__main__":
