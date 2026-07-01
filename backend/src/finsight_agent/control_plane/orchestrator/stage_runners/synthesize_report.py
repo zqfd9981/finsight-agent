@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from finsight_agent.capabilities.reporting.service import (
-    EvidenceOverviewBlock,
-    EvidenceOverviewItem,
-    ReportingService,
-)
+from finsight_agent.capabilities.reporting.service import ReportingService
 from finsight_agent.capabilities.retrieval.models import RetrievalResult
 from shared.contracts.analysis_request import AnalysisRequest
+from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
 from shared.contracts.router_result import RouterResult
 from shared.enums.stage_name import StageName
 

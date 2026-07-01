@@ -1,25 +1,14 @@
 from __future__ import annotations
 
-from typing import TypedDict, cast
+from typing import cast
 
 from shared.contracts.final_response import FinalResponse
+from shared.contracts.report_block import (
+    EvidenceOverviewBlock,
+    EvidenceOverviewItem,
+    ReportBlock,
+)
 from shared.enums.response_type import ResponseType
-
-
-class EvidenceOverviewItem(TypedDict):
-    evidence_id: str
-    excerpt: str
-    company_name: str
-    doc_type: str
-
-
-class EvidenceOverviewBlock(TypedDict):
-    block_type: str
-    title: str
-    items: list[EvidenceOverviewItem]
-
-
-ReportBlock = EvidenceOverviewBlock
 
 
 class ReportingService:

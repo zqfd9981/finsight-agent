@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from finsight_agent.capabilities.retrieval.service import RetrievalFacade
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.router_result import RouterResult
@@ -54,6 +56,11 @@ def _build_retrieval_query(
         request.query.strip(),
         str(entities.get("claim") or "").strip(),
         str(stage_constraints.get("target") or entities.get("target") or "").strip(),
+        str(entities.get("event") or "").strip(),
+        *_normalize_parts(entities.get("themes")),
+        str(entities.get("time_scope") or "").strip(),
+        str(entities.get("target") or "").strip(),
+        *_normalize_parts(stage_constraints.get("target_scope")),
     ]
 
     normalized_parts: list[str] = []
@@ -67,3 +74,17 @@ def _build_retrieval_query(
         seen.add(part)
 
     return " ".join(normalized_parts)
+
+
+def _normalize_parts(value: object) -> list[str]:
+    if isinstance(value, str):
+        candidate = value.strip()
+        return [candidate] if candidate else []
+    if isinstance(value, Iterable):
+        normalized: list[str] = []
+        for item in value:
+            candidate = str(item).strip()
+            if candidate:
+                normalized.append(candidate)
+        return normalized
+    return []

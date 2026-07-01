@@ -22,6 +22,7 @@ from finsight_agent.capabilities.retrieval.models import (
 from finsight_agent.control_plane.orchestrator.models import StageExecutionResult
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.router_result import RouterResult
+from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
 
 
 class _StubStructuredDataService:
@@ -196,7 +197,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertIn("宁德时代", final_response.summary)
         self.assertIn("123.45", final_response.summary)
 
-    def test_retrieve_evidence_stage_builds_query_from_request_claim_and_target(self) -> None:
+    def test_retrieve_evidence_stage_builds_query_in_fixed_order_and_deduplicates(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.retrieve_evidence import (
             run_retrieve_evidence_stage,
         )
@@ -208,7 +209,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
             router_result=_build_router_result(
                 intent="evidence_lookup",
                 entities={
-                    "target": "航运",
+                    "target": "航运股",
                     "claim": "红海事件对航运运价有影响",
                 },
                 constraints={"retrieval_budget": 3},
@@ -224,9 +225,43 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(result.evidence_refs, ["evd_001"])
         self.assertEqual(len(facade.calls), 1)
         self.assertEqual(facade.calls[0]["limit"], 3)
-        self.assertIn("给我证据", str(facade.calls[0]["raw_query"]))
-        self.assertIn("红海事件对航运运价有影响", str(facade.calls[0]["raw_query"]))
-        self.assertIn("航运股", str(facade.calls[0]["raw_query"]))
+        self.assertEqual(
+            facade.calls[0]["raw_query"],
+            "给我证据 红海事件对航运运价有影响 航运股",
+        )
+
+    def test_retrieve_evidence_stage_prefers_stage_target_and_uses_event_context_in_order(self) -> None:
+        from finsight_agent.control_plane.orchestrator.stage_runners.retrieve_evidence import (
+            run_retrieve_evidence_stage,
+        )
+
+        retrieval_result = _build_retrieval_result()
+        facade = _StubRetrievalFacade(retrieval_result)
+        run_retrieve_evidence_stage(
+            request=_build_request(query="分析红海风险"),
+            router_result=_build_router_result(
+                intent="event_impact_analysis",
+                entities={
+                    "event": "红海事件",
+                    "themes": ["航运", "能源", "航运"],
+                    "time_scope": "2024Q1",
+                    "target": "港口",
+                },
+            ),
+            stage_constraints={
+                "retrieval_budget": 4,
+                "target_scope": ["航运", "港口", "航运"],
+                "target": "港口股",
+            },
+            execution_state={},
+            retrieval_facade=facade,
+        )
+
+        self.assertEqual(len(facade.calls), 1)
+        self.assertEqual(
+            facade.calls[0]["raw_query"],
+            "分析红海风险 港口股 红海事件 航运 能源 2024Q1 港口",
+        )
 
     def test_retrieve_evidence_stage_falls_back_to_router_target_when_stage_target_missing(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.retrieve_evidence import (
@@ -248,8 +283,10 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
 
         self.assertEqual(len(facade.calls), 1)
         self.assertEqual(facade.calls[0]["limit"], 2)
-        self.assertIn("继续找相关证据", str(facade.calls[0]["raw_query"]))
-        self.assertIn("出海服务", str(facade.calls[0]["raw_query"]))
+        self.assertEqual(
+            facade.calls[0]["raw_query"],
+            "继续找相关证据 出海服务",
+        )
 
     def test_synthesize_report_stage_builds_report_response_from_retrieval_result(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_report import (
@@ -297,18 +334,18 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
             session_id="sess_report_service",
             summary="已检索到 1 条证据。",
             report_blocks=[
-                {
-                    "block_type": "evidence_overview",
-                    "title": "证据概览",
-                    "items": [
-                        {
-                            "evidence_id": "evd_001",
-                            "excerpt": "证据 1",
-                            "company_name": "示例公司",
-                            "doc_type": "annual_report",
-                        }
+                EvidenceOverviewBlock(
+                    block_type="evidence_overview",
+                    title="证据概览",
+                    items=[
+                        EvidenceOverviewItem(
+                            evidence_id="evd_001",
+                            excerpt="证据 1",
+                            company_name="示例公司",
+                            doc_type="annual_report",
+                        )
                     ],
-                }
+                )
             ],
             uncertainty_notes=["证据数量有限"],
             next_actions=["可继续追问更具体时间段"],
