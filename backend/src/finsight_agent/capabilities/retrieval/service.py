@@ -10,21 +10,20 @@ from finsight_agent.infra.external.cninfo_filings import CninfoFilingsAdapter
 from finsight_agent.infra.external.sse_filings import SseFilingsAdapter
 
 from .acquisition_service import DefaultDownloader, PdfCorpusAcquisitionService
-from .citation_builder import build_citation_record, build_parent_context
 from .dense_index import DenseChunkIndex
 from .dense_retrieval_service import DenseRetrievalService
+from .evidence_assembly import assemble_evidence_item
 from .fusion import rrf_fuse
-from .models import (
-    CitationRecord,
-    DenseSearchFilters,
-    EvidenceItem,
-    RetrievalResult,
-    RetrievalScoreBreakdown,
-    SparseSearchFilters,
-)
+from .models import DenseSearchFilters, RetrievalResult, SparseSearchFilters
+from .parent_context_loader import ParentContextLoader
 from .rerank import rerank_hits
 from .sparse_index import SparseChunkIndex
 from .sparse_retrieval_service import SparseRetrievalService
+from .trace_builder import (
+    attach_trace_to_result,
+    build_retrieval_notes,
+    build_retrieval_trace,
+)
 
 
 @dataclass(slots=True)
@@ -116,6 +115,7 @@ class RetrievalFacade:
 
     sparse_facade: SparseRetrievalFacade
     dense_facade: DenseRetrievalFacade
+    parent_loader: ParentContextLoader
 
     def retrieve_evidence(
         self,
@@ -125,6 +125,8 @@ class RetrievalFacade:
         doc_type: str | None = None,
         report_year: int | None = None,
     ) -> RetrievalResult:
+        normalized_query = raw_query.strip()
+        search_limit = max(limit, 10)
         sparse_filters = SparseSearchFilters(
             company_code=company_code,
             doc_type=doc_type,
@@ -137,64 +139,60 @@ class RetrievalFacade:
 
         sparse_result = self.sparse_facade.search(
             query_text=raw_query,
-            limit=max(limit, 10),
+            limit=search_limit,
             filters=sparse_filters,
         )
         dense_result = self.dense_facade.search(
             query_text=raw_query,
-            limit=max(limit, 10),
+            limit=search_limit,
             filters=dense_filters,
         )
 
         fused_hits = rrf_fuse(sparse_result.hits, dense_result.hits)
-        reranked_hits = rerank_hits(fused_hits, raw_query, top_n=max(limit, 10))
+        reranked_hits = rerank_hits(fused_hits, raw_query, top_n=search_limit)
 
-        evidence_items: list[EvidenceItem] = []
+        evidence_items = []
+        parent_expand_fallback_count = 0
         for rank, hit in enumerate(reranked_hits[:limit], start=1):
-            citation = build_citation_record(
+            parent_record = self.parent_loader.load_parent(
                 document_id=hit.document_id,
-                page_start=hit.page_start,
-                page_end=hit.page_end,
-                page_anchor=hit.page_anchor,
+                parent_id=hit.parent_id,
             )
-            evidence_items.append(
-                EvidenceItem(
-                    evidence_id=f"evidence_{rank:04d}",
-                    rank=rank,
-                    support_strength=_classify_support_strength(hit.rerank_score),
-                    matched_chunk_id=hit.chunk_id,
-                    matched_parent_id=hit.parent_id,
-                    excerpt=hit.chunk_text,
-                    parent_context=build_parent_context(hit.chunk_text),
-                    citation=citation,
-                    retrieval_scores=RetrievalScoreBreakdown(
-                        sparse_score=hit.sparse_score,
-                        dense_score=hit.dense_score,
-                        rrf_score=hit.rrf_score,
-                        rerank_score=hit.rerank_score,
-                    ),
-                    company_code=hit.company_code,
-                    company_name=hit.company_name,
-                    doc_type=hit.doc_type,
-                    section_path=list(hit.section_path),
-                )
+            evidence, used_fallback = assemble_evidence_item(
+                rank=rank,
+                hit=hit,
+                parent_record=parent_record,
             )
+            evidence_items.append(evidence)
+            if used_fallback:
+                parent_expand_fallback_count += 1
 
-        retrieval_notes: list[str] = []
-        if sparse_result.triggered_rewrite_queries:
-            retrieval_notes.append(
-                f"sparse rewrite: {', '.join(sparse_result.triggered_rewrite_queries)}"
-            )
-        if dense_result.rewrite_queries:
-            retrieval_notes.append(
-                f"dense rewrite: {', '.join(dense_result.rewrite_queries)}"
-            )
+        retrieval_trace = build_retrieval_trace(
+            original_query=raw_query,
+            normalized_query=normalized_query,
+            sparse_result=sparse_result,
+            dense_result=dense_result,
+            fused_hit_count=len(fused_hits),
+            reranked_hit_count=len(reranked_hits),
+            final_evidence_count=len(evidence_items),
+            parent_expand_attempted=bool(evidence_items),
+            parent_expand_fallback_count=parent_expand_fallback_count,
+        )
+        retrieval_notes = build_retrieval_notes(
+            sparse_result=sparse_result,
+            dense_result=dense_result,
+            parent_expand_fallback_count=parent_expand_fallback_count,
+        )
 
-        return RetrievalResult(
+        result = RetrievalResult(
             request_id=str(uuid.uuid4()),
-            normalized_claim=raw_query.strip(),
+            normalized_claim=normalized_query,
             evidence_items=evidence_items,
-            retrieval_notes=retrieval_notes,
+        )
+        return attach_trace_to_result(
+            result=result,
+            trace=retrieval_trace,
+            notes=retrieval_notes,
         )
 
     def close(self) -> None:
@@ -237,17 +235,9 @@ def build_dense_retrieval_facade() -> DenseRetrievalFacade:
 
 
 def build_retrieval_facade() -> RetrievalFacade:
+    settings = load_settings()
     return RetrievalFacade(
         sparse_facade=build_sparse_retrieval_facade(),
         dense_facade=build_dense_retrieval_facade(),
+        parent_loader=ParentContextLoader(settings.retrieval.chunked_filings_root),
     )
-
-
-def _classify_support_strength(score: float) -> str:
-    if score >= 0.8:
-        return "strong"
-    if score >= 0.5:
-        return "partial"
-    if score > 0:
-        return "weak"
-    return "unsupported"

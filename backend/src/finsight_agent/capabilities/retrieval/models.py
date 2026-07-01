@@ -163,6 +163,24 @@ class EvidenceItem:
 
 
 @dataclass(slots=True)
+class RetrievalTrace:
+    """检索链路追踪信息。"""
+
+    original_query: str
+    normalized_query: str
+    rewrite_queries: list[str] = field(default_factory=list)
+    sparse_hit_count: int = 0
+    dense_hit_count: int = 0
+    fused_hit_count: int = 0
+    reranked_hit_count: int = 0
+    final_evidence_count: int = 0
+    sparse_rewrite_triggered: bool = False
+    dense_rewrite_triggered: bool = False
+    parent_expand_attempted: bool = False
+    parent_expand_fallback_count: int = 0
+
+
+@dataclass(slots=True)
 class RetrievalResult:
     """统一的 retrieval facade 输出。"""
 
@@ -170,3 +188,4 @@ class RetrievalResult:
     normalized_claim: str
     evidence_items: list[EvidenceItem] = field(default_factory=list)
     retrieval_notes: list[str] = field(default_factory=list)
+    retrieval_trace: RetrievalTrace | None = None
