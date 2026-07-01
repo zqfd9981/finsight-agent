@@ -17,3 +17,21 @@ class ReportingService:
             uncertainty_notes=[],
             next_actions=[],
         )
+
+    def build_report_response(
+        self,
+        session_id: str,
+        summary: str,
+        report_blocks: list[dict[str, object]],
+        uncertainty_notes: list[str],
+        next_actions: list[str],
+    ) -> FinalResponse:
+        """构造最小 report 响应对象。"""
+        return FinalResponse(
+            response_type=ResponseType.SUCCESS.value,
+            session_id=session_id,
+            summary=summary,
+            report_blocks=list(report_blocks),
+            uncertainty_notes=list(uncertainty_notes),
+            next_actions=list(next_actions),
+        )
