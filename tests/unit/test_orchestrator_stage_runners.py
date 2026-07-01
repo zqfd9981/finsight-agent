@@ -366,6 +366,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(first_item["evidence_id"], "evd_001")
         self.assertEqual(first_item["excerpt"], "运价指数在相关期间明显波动。")
         self.assertEqual(first_item["company_name"], "示例公司")
+        self.assertEqual(first_item["doc_type"], "annual_report")
         self.assertEqual(result.evidence_refs, ["evd_001"])
 
     def test_build_report_response_returns_minimal_final_response(self) -> None:
