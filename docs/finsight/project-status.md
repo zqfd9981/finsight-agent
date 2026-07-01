@@ -34,9 +34,9 @@
 | `shared-analysis-contracts` | 完成 | `shared/contracts` 与 fixtures 已稳定 |
 | `workbench-backend-api-boundary` | 完成 | 统一 request / response 边界已稳定 |
 | `semantic-routing-and-planning` | 完成首版 | router / planner 已可稳定支撑真实链路 |
-| `conversation-session-state` | 未开始 | 当前只透传 `session_id`，未接入真实会话状态 |
+| `conversation-session-state` | 完成首版 | `SessionContext` 已真实接入统一入口，并支持 rolling summary 短期记忆 |
 | `event-analysis-orchestration` | 完成首版最小路径 | `metric_lookup` / `evidence_lookup` 已真实接线 |
-| `structured-market-data-support` | 进行中 | 结构化数据仍以首版最小能力支撑快路径 |
+| `structured-market-data-support` | 进行中 | 已完成本地指标库、本地优先查询与外部 fallback 首版能力 |
 | `evidence-retrieval-pipeline` | 完成首版 | retrieval 主链与结构化输出已可稳定消费 |
 | `report-trace-and-evaluation` | 进行中 | response / trace 已接线，评测体系仍待补强 |
 | `analysis-workbench` | 进行中 | 前端展示与真实 follow-up 体验仍待继续完善 |
@@ -63,32 +63,22 @@
 
 ## 6. 当前阻塞项
 
-### Blocker 1：真实 `SessionContext` 仍未接入统一后端入口
+### Blocker 1：`structured-market-data-support` 仍处于首版有限覆盖阶段
 
 影响范围：
 
-- evidence follow-up 的真实上下文延续
-- compare / drilldown / expand 等 follow-up 的线上行为一致性
+- `metric_lookup` 的真实覆盖范围仍受本地指标库与 fallback provider 数量限制
+- 季报、更多公司和更多指标暂未进入首版能力范围
 
 解除条件：
 
-- `WorkbenchBackendApiService` 与上层入口开始消费真实 `SessionContext`
+- 完成更多指标、期间类型与 provider 的扩展，并形成更稳定的构建入口
 
-### Blocker 2：`structured-market-data-support` 仍是首版最小能力
-
-影响范围：
-
-- `metric_lookup` 的答案稳定性与可扩展性
-
-解除条件：
-
-- 接入真实结构化指标源或稳定离线指标表
-
-### Blocker 3：评测样本与验收口径仍待体系化
+### Blocker 2：评测样本与验收口径仍待体系化
 
 影响范围：
 
-- retrieval / orchestrator / response 的持续回归能力
+- retrieval / structured data / orchestrator / response 的持续回归能力
 
 解除条件：
 
@@ -96,7 +86,7 @@
 
 ## 7. 下一阶段建议
 
-1. 优先把 `SessionContext` 真正接入 `WorkbenchBackendApiService`
-2. 补齐 evidence follow-up 在线链路，而不是只在单测中覆盖
-3. 推进 `structured-market-data-support` 的真实数据接入
-4. 为 orchestrator / retrieval / response 建立更明确的评测样本与回归集
+1. 扩大 `structured-market-data-support` 的本地指标覆盖范围
+2. 选定并接入首个真实外部指标 provider，替代当前 no-op fallback
+3. 为 structured data / orchestrator / retrieval 建立更明确的评测样本与回归集
+4. 继续推进 `event_impact_analysis` 的前两阶段真实 runner
