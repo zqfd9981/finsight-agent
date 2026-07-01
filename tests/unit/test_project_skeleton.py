@@ -9,7 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_SRC_ROOT = REPO_ROOT / "backend" / "src"
 
-# 让测试既能导入后端包，也能导入顶层 shared 包。
+# 让测试同时可以导入后端包和顶层 shared 包。
 for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -123,11 +123,21 @@ class ProjectSkeletonTest(unittest.TestCase):
             Intent.METRIC_LOOKUP.value,
         )
         self.assertEqual(
-            WorkbenchBackendApiService().build_stub_response(
+            WorkbenchBackendApiService().build_response(
                 AnalysisRequest(query="宁德时代 2024 年净利润是多少？")
             ).response.session_id,
             "sess_stub",
         )
+
+    def test_orchestrator_modules_can_be_imported(self) -> None:
+        """校验 orchestrator 首版模块可以被稳定导入。"""
+        import finsight_agent.control_plane.orchestrator.models as orchestrator_models
+        import finsight_agent.control_plane.orchestrator.observation_builder as observation_builder
+        import finsight_agent.control_plane.orchestrator.service as orchestrator_service
+
+        self.assertTrue(hasattr(orchestrator_models, "OrchestrationResult"))
+        self.assertTrue(hasattr(observation_builder, "build_stage_observation"))
+        self.assertTrue(hasattr(orchestrator_service, "OrchestratorService"))
 
     def test_contract_fixture_is_valid_json(self) -> None:
         """校验 contract fixture 至少能被正常解析。"""

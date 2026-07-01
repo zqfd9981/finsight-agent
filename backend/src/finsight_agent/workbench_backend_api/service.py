@@ -3,32 +3,40 @@ from __future__ import annotations
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
 from shared.contracts.trace_block import TraceBlock
-from shared.enums.follow_up_type import FollowUpType
-from shared.enums.intent import Intent
 
-from finsight_agent.capabilities.reporting.service import ReportingService
+from finsight_agent.control_plane.orchestrator.service import OrchestratorService
+from finsight_agent.control_plane.planner.service import PlannerService
 from finsight_agent.control_plane.router.service import RouterService
 
 
 class WorkbenchBackendApiService:
-    """统一分析入口的最小后端适配服务。"""
+    """统一分析入口，负责串起 route -> plan -> orchestrate。"""
 
     def __init__(self) -> None:
         self._router_service = RouterService()
-        self._reporting_service = ReportingService()
+        self._planner_service = PlannerService()
+        self._orchestrator_service = OrchestratorService()
 
-    def build_stub_response(self, request: AnalysisRequest) -> AnalysisResponseEnvelope:
-        """根据共享 request contract 返回稳定的占位响应 envelope。"""
+    def build_response(self, request: AnalysisRequest) -> AnalysisResponseEnvelope:
         session_id = request.session_id or "sess_stub"
-        router_result = self._router_service.build_metric_lookup_stub()
-
-        if request.query_mode == "follow_up":
-            router_result.follow_up_type = FollowUpType.DRILLDOWN.value
-
-        response = self._reporting_service.build_brief_response(
-            session_id=session_id,
-            summary=f"占位分析结果：{request.query}",
+        router_result = self._router_service.route(
+            query=request.query,
+            session_context=None,
         )
+        plan = self._planner_service.build_plan(router_result)
+        orchestration_result = self._orchestrator_service.execute(
+            request=AnalysisRequest(
+                query=request.query,
+                query_mode=request.query_mode,
+                session_id=session_id,
+                include_trace=request.include_trace,
+                notes=request.notes,
+            ),
+            router_result=router_result,
+            plan=plan,
+            session_context=None,
+        )
+
         trace_blocks: list[TraceBlock] = []
         if request.include_trace:
             trace_blocks.append(
@@ -41,10 +49,29 @@ class WorkbenchBackendApiService:
                         "follow_up_type": router_result.follow_up_type,
                         "query_mode": request.query_mode,
                     },
-                    raw_refs=[Intent.METRIC_LOOKUP.value],
+                    raw_refs=[router_result.intent],
                 )
             )
+            trace_blocks.append(
+                TraceBlock(
+                    block_type="planning",
+                    title="计划结果",
+                    status="success",
+                    payload_summary={
+                        "plan_id": plan.plan_id,
+                        "intent": plan.intent,
+                        "stage_count": len(plan.stages),
+                        "stages": list(plan.stages),
+                    },
+                    raw_refs=list(plan.stages),
+                )
+            )
+            trace_blocks.extend(orchestration_result.trace_blocks)
 
+        response = (
+            orchestration_result.final_response
+            or orchestration_result.guardrail_response
+        )
         return AnalysisResponseEnvelope(
             session_id=session_id,
             turn_id="turn_stub",

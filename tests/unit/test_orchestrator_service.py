@@ -19,6 +19,79 @@ from finsight_agent.control_plane.orchestrator.models import (
 from finsight_agent.control_plane.orchestrator.observation_builder import (
     build_stage_observation,
 )
+from finsight_agent.control_plane.orchestrator.service import OrchestratorService
+from shared.contracts.analysis_request import AnalysisRequest
+from shared.contracts.final_response import FinalResponse
+from shared.contracts.plan import Plan
+from shared.contracts.router_result import RouterResult
+from shared.enums.follow_up_type import FollowUpType
+from shared.enums.intent import Intent
+from shared.enums.response_mode import ResponseMode
+
+
+class StubStructuredDataService:
+    def query_metric_lookup(
+        self,
+        company: str,
+        metric: str,
+        time_scope: str,
+    ) -> dict[str, str]:
+        return {
+            "company": "宁德时代",
+            "metric": metric,
+            "time_scope": time_scope,
+            "value": "123.45 亿元",
+        }
+
+
+class StubReportingService:
+    def build_brief_response(self, session_id: str, summary: str) -> FinalResponse:
+        return FinalResponse(
+            response_type="success",
+            session_id=session_id,
+            summary=summary,
+        )
+
+    def build_report_response(
+        self,
+        session_id: str,
+        summary: str,
+        report_blocks: list[dict[str, object]],
+        uncertainty_notes: list[str],
+        next_actions: list[str],
+    ) -> FinalResponse:
+        return FinalResponse(
+            response_type="success",
+            session_id=session_id,
+            summary=summary,
+            report_blocks=report_blocks,
+            uncertainty_notes=uncertainty_notes,
+            next_actions=next_actions,
+        )
+
+
+class StubRetrievalFacade:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def retrieve_evidence(
+        self,
+        raw_query: str,
+        limit: int = 5,
+        company_code: str | None = None,
+        doc_type: str | None = None,
+        report_year: int | None = None,
+    ):
+        from finsight_agent.capabilities.retrieval.models import RetrievalResult
+
+        return RetrievalResult(
+            request_id="retrieval_001",
+            normalized_claim=raw_query,
+            evidence_items=[],
+        )
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class OrchestratorModelsTest(unittest.TestCase):
@@ -55,14 +128,14 @@ class OrchestratorModelsTest(unittest.TestCase):
         observation = build_stage_observation(
             stage_result=result,
             observation_id="obs_001",
-            input_summary={"query": "红海事件利好谁"},
+            input_summary={"query": "红海事件利好谁？"},
         )
 
         self.assertEqual(observation.version, "v1")
         self.assertEqual(observation.observation_id, "obs_001")
         self.assertEqual(observation.stage_name, "retrieve_evidence")
         self.assertEqual(observation.status, "success")
-        self.assertEqual(observation.input_summary, {"query": "红海事件利好谁"})
+        self.assertEqual(observation.input_summary, {"query": "红海事件利好谁？"})
         self.assertEqual(observation.key_outputs, {"top_k": 3, "matches": ["a", "b"]})
         self.assertEqual(observation.confidence_signals, {"coverage": "high"})
         self.assertEqual(observation.evidence_refs, ["chunk:1"])
@@ -74,6 +147,220 @@ class OrchestratorModelsTest(unittest.TestCase):
         self.assertEqual(result.session_id, "sess_001")
         self.assertEqual(result.stage_observations, [])
         self.assertEqual(result.trace_blocks, [])
+
+
+class OrchestratorServiceExecutionTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.service = OrchestratorService(
+            structured_data_service=StubStructuredDataService(),
+            reporting_service=StubReportingService(),
+            retrieval_facade=StubRetrievalFacade(),
+        )
+
+    def test_execute_metric_lookup_plan_runs_two_stages_and_returns_final_response(self) -> None:
+        router_result = RouterResult(
+            intent=Intent.METRIC_LOOKUP.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={
+                "company": "宁德时代",
+                "metric": "net_profit",
+                "time_scope": "2024_annual",
+            },
+            needs=["structured_data_query"],
+            constraints={"preferred_output": "brief_answer"},
+        )
+        plan = Plan(
+            plan_id="plan_metric_lookup_v1",
+            intent=Intent.METRIC_LOOKUP.value,
+            stages=["query_structured_data", "synthesize_brief_answer"],
+            stage_constraints={
+                "query_structured_data": {"time_hint": "2024_annual"},
+                "synthesize_brief_answer": {"preferred_output": "brief_answer"},
+            },
+            response_mode=ResponseMode.BRIEF_ANSWER.value,
+        )
+
+        result = self.service.execute(
+            request=AnalysisRequest(
+                query="宁德时代 2024 年净利润是多少？",
+                session_id="sess_001",
+                include_trace=True,
+            ),
+            router_result=router_result,
+            plan=plan,
+            session_context=None,
+        )
+
+        self.assertIsNotNone(result.final_response)
+        self.assertEqual(result.final_response.response_type, "success")
+        self.assertEqual(len(result.stage_observations), 2)
+        self.assertEqual(result.stage_observations[0].stage_name, "query_structured_data")
+        self.assertEqual(result.stage_observations[1].stage_name, "synthesize_brief_answer")
+        self.assertEqual(result.trace_blocks[-1].block_type, "execution")
+
+    def test_execute_out_of_scope_plan_short_circuits_without_stage_execution(self) -> None:
+        router_result = RouterResult(
+            intent=Intent.OUT_OF_SCOPE.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={"query": "预测一下比亚迪下周股价走势"},
+            needs=[],
+            constraints={
+                "preferred_output": "guardrail",
+                "reason_code": "out_of_scope_request",
+            },
+        )
+        plan = Plan(
+            plan_id="plan_out_of_scope_v1",
+            intent=Intent.OUT_OF_SCOPE.value,
+            stages=[],
+            stage_constraints={
+                "guardrail": {
+                    "preferred_output": "guardrail",
+                    "reason_code": "out_of_scope_request",
+                }
+            },
+            response_mode=ResponseMode.BRIEF_ANSWER.value,
+        )
+
+        result = self.service.execute(
+            request=AnalysisRequest(
+                query="预测一下比亚迪下周股价走势",
+                session_id="sess_001",
+                include_trace=True,
+            ),
+            router_result=router_result,
+            plan=plan,
+            session_context=None,
+        )
+
+        self.assertIsNone(result.final_response)
+        self.assertIsNotNone(result.guardrail_response)
+        self.assertEqual(result.guardrail_response.response_type, "guardrail")
+        self.assertEqual(result.stage_observations, [])
+
+    def test_execute_raises_for_unsupported_stage(self) -> None:
+        router_result = RouterResult(
+            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={"event": "红海局势升级"},
+            needs=["news_search"],
+            constraints={"preferred_output": "report"},
+        )
+        plan = Plan(
+            plan_id="plan_event_impact_analysis_v1",
+            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
+            stages=["collect_event_context"],
+            stage_constraints={
+                "collect_event_context": {"retrieval_budget": 3},
+            },
+            response_mode=ResponseMode.REPORT.value,
+        )
+
+        with self.assertRaises(KeyError):
+            self.service.execute(
+                request=AnalysisRequest(
+                    query="红海局势升级利好哪些 A 股航运公司？",
+                    session_id="sess_001",
+                ),
+                router_result=router_result,
+                plan=plan,
+                session_context=None,
+            )
+
+    def test_execute_metric_lookup_plan_does_not_build_retrieval_facade(self) -> None:
+        retrieval_factory_calls: list[str] = []
+
+        def build_retrieval_facade_stub() -> StubRetrievalFacade:
+            retrieval_factory_calls.append("built")
+            return StubRetrievalFacade()
+
+        service = OrchestratorService(
+            structured_data_service=StubStructuredDataService(),
+            reporting_service=StubReportingService(),
+            retrieval_facade_factory=build_retrieval_facade_stub,
+        )
+        router_result = RouterResult(
+            intent=Intent.METRIC_LOOKUP.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={
+                "company": "宁德时代",
+                "metric": "net_profit",
+                "time_scope": "2024_annual",
+            },
+            needs=["structured_data_query"],
+            constraints={"preferred_output": "brief_answer"},
+        )
+        plan = Plan(
+            plan_id="plan_metric_lookup_v1",
+            intent=Intent.METRIC_LOOKUP.value,
+            stages=["query_structured_data", "synthesize_brief_answer"],
+            stage_constraints={
+                "query_structured_data": {"time_hint": "2024_annual"},
+                "synthesize_brief_answer": {"preferred_output": "brief_answer"},
+            },
+            response_mode=ResponseMode.BRIEF_ANSWER.value,
+        )
+
+        service.execute(
+            request=AnalysisRequest(
+                query="宁德时代 2024 年净利润是多少？",
+                session_id="sess_001",
+            ),
+            router_result=router_result,
+            plan=plan,
+            session_context=None,
+        )
+
+        self.assertEqual(retrieval_factory_calls, [])
+
+    def test_execute_evidence_plan_closes_owned_retrieval_facade_after_execution(self) -> None:
+        retrieval_facade = StubRetrievalFacade()
+
+        def build_retrieval_facade_stub() -> StubRetrievalFacade:
+            return retrieval_facade
+
+        service = OrchestratorService(
+            reporting_service=StubReportingService(),
+            retrieval_facade_factory=build_retrieval_facade_stub,
+        )
+        router_result = RouterResult(
+            intent=Intent.EVIDENCE_LOOKUP.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={
+                "target": "中远海能",
+                "claim": "把中远海能受益逻辑的证据展开一下",
+            },
+            needs=["rag_retrieval"],
+            constraints={"preferred_output": "report", "retrieval_budget": 3},
+        )
+        plan = Plan(
+            plan_id="plan_evidence_lookup_v1",
+            intent=Intent.EVIDENCE_LOOKUP.value,
+            stages=["retrieve_evidence", "synthesize_report"],
+            stage_constraints={
+                "retrieve_evidence": {"retrieval_budget": 3},
+                "synthesize_report": {"preferred_output": "report"},
+            },
+            response_mode=ResponseMode.REPORT.value,
+        )
+
+        result = service.execute(
+            request=AnalysisRequest(
+                query="把中远海能受益逻辑的证据展开一下",
+                session_id="sess_001",
+            ),
+            router_result=router_result,
+            plan=plan,
+            session_context=None,
+        )
+
+        self.assertIsNotNone(result.final_response)
+        self.assertTrue(retrieval_facade.closed)
 
 
 if __name__ == "__main__":
