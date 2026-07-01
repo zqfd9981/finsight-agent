@@ -51,11 +51,18 @@ class SessionService:
         ):
             return None
 
+        previous_context = None
+        if request.session_id:
+            existing_snapshot = self._repository.load(request.session_id)
+            if existing_snapshot is not None:
+                previous_context = existing_snapshot.context
+
         context = self._extractor.extract(
             request=request,
             router_result=router_result,
             plan=plan,
             orchestration_result=orchestration_result,
+            previous_context=previous_context,
         )
 
         return SessionSnapshot(
