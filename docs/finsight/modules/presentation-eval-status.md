@@ -1,6 +1,6 @@
 # 呈现与评测面状态
 
-日期：2026-06-27
+日期：2026-07-01
 当前状态：进行中
 当前负责人：待分配
 
@@ -16,14 +16,16 @@
 ## 3. 本轮目标
 
 - 保持 `FinalResponse`、`TraceBlock` 和 guardrail 响应骨架稳定
-- 已接上统一 API boundary 的 envelope，不再只停留在孤立 mock
-- 页面展示仍保持后置，不着急接真实复杂后端
+- 让后续页面和 orchestrator 可以消费新的 `retrieval_trace`
+- 继续把真实 UI 与评测工作后置到 retrieval / orchestrator 接线之后
 
 ## 4. 已冻结输入
 
 - 共享接口：`FinalResponse`、`TraceBlock`、`GuardrailOrErrorResponse`
 - 参考文档：`docs/finsight/shared-contracts-v1.md`
-- 当前依赖：统一 API boundary 已冻结，可先基于 response envelope 推进
+- 当前依赖：
+  - 统一 API boundary
+  - retrieval facade / retrieval output assembly
 
 ## 5. 本轮输出
 
@@ -36,25 +38,25 @@
 - 任务：`FinalResponse` success 渲染
   状态：部分完成
   窗口：主控窗口
-  说明：后端 `FinalResponse` 骨架已可稳定产出，页面渲染仍待继续
+  说明：后端 `FinalResponse` 骨架已稳定，页面端尚未接 retrieval 真结果
 - 任务：`TraceBlock` 面板
   状态：部分完成
   窗口：主控窗口
-  说明：已接入 routing trace 占位块，planning/retrieval 面板仍未实现
+  说明：routing / planning 占位 trace 已有，retrieval trace 刚在后端落地，前端尚未接线
 - 任务：guardrail 展示
   状态：未开始
   窗口：待分配
-  说明：先保证用户能看懂为什么停住、下一步怎么办
+  说明：仍需把停住原因和下一步建议做成清晰页面反馈
 - 任务：workbench API client 骨架
   状态：已完成
   窗口：主控窗口
-  说明：已落地统一 request/envelope 的前端 client，占位消费 API boundary
+  说明：已落地统一 request/envelope 的前端 client
 
 ## 7. 当前卡点
 
-- 页面级 workbench 交互仍未实现
-- planning / retrieval trace 仍未接入
-- 真实 orchestrator 没接入前，仍只能先验证骨架展示链路
+- retrieval trace 虽已在后端落地，但页面侧还没消费
+- orchestrator 还没接 retrieval 主链路，导致页面无法展示真实完整分析
+- 评测层还没引入 retrieval 质量评测样例
 
 ## 8. 不要改什么
 
@@ -64,10 +66,11 @@
 
 ## 9. 下一次阶段检查
 
-- 检查 workbench 是否进入首条真实 API 调用与结果展示实现
+- 检查 workbench 是否开始消费 retrieval trace
+- 检查评测层是否接入首批 retrieval 样例
 
 ## 10. 完成定义
 
 - `FinalResponse`、`TraceBlock`、guardrail response 的 contract 与骨架已稳定
-- workbench 能通过统一 API boundary client 接入后端
-- 下一轮只需补真实页面交互与结果展示，而不是重做接口边界
+- retrieval 真实输出已经可供页面消费
+- 下一轮只需补真实页面交互、retrieval trace 展示与评测，而不是回头修改 retrieval contract
