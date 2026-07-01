@@ -17,7 +17,7 @@ from shared.contracts.analysis_request import AnalysisRequest
 
 
 class MetricLookupIntegrationTest(unittest.TestCase):
-    def test_metric_lookup_request_returns_routing_trace(self) -> None:
+    def test_metric_lookup_request_returns_routing_planning_and_execution_trace(self) -> None:
         payload = handle_analysis_turn(
             AnalysisRequest(
                 query="宁德时代 2024 年净利润是多少？",
@@ -27,27 +27,33 @@ class MetricLookupIntegrationTest(unittest.TestCase):
 
         self.assertEqual(payload["session_id"], "sess_stub")
         self.assertEqual(payload["response"]["response_type"], "success")
-        self.assertEqual(payload["trace_blocks"][0]["block_type"], "routing")
+        self.assertEqual(
+            [block["block_type"] for block in payload["trace_blocks"]],
+            ["routing", "planning", "execution"],
+        )
         self.assertEqual(
             payload["trace_blocks"][0]["payload_summary"]["intent"],
             "metric_lookup",
         )
-        self.assertEqual(len(payload["trace_blocks"]), 1)
+        self.assertEqual(
+            payload["trace_blocks"][1]["payload_summary"]["stage_count"],
+            2,
+        )
 
-    def test_follow_up_request_keeps_same_session_and_marks_drilldown(self) -> None:
+    def test_evidence_lookup_request_returns_execution_trace_and_success_response(self) -> None:
         payload = handle_analysis_turn(
             AnalysisRequest(
-                query="继续展开一下这个指标同比变化的原因。",
-                query_mode="follow_up",
+                query="把中远海能受益逻辑的证据展开一下",
                 session_id="sess_existing",
                 include_trace=True,
             )
         )
 
         self.assertEqual(payload["session_id"], "sess_existing")
-        self.assertEqual(
-            payload["trace_blocks"][0]["payload_summary"]["follow_up_type"],
-            "drilldown",
+        self.assertEqual(payload["response"]["response_type"], "success")
+        self.assertIn(
+            "execution",
+            [block["block_type"] for block in payload["trace_blocks"]],
         )
 
 
