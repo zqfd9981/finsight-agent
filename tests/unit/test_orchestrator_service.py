@@ -236,6 +236,14 @@ class OrchestratorModelsTest(unittest.TestCase):
 
 
 class OrchestratorServiceExecutionTest(unittest.TestCase):
+    def test_service_builds_dual_source_external_context_retriever_by_default(self) -> None:
+        service = OrchestratorService()
+
+        self.assertEqual(
+            service._external_context_retriever.__class__.__name__,
+            "DualSourceExternalContextRetriever",
+        )
+
     def setUp(self) -> None:
         self.service = OrchestratorService(
             structured_data_service=StubStructuredDataService(),

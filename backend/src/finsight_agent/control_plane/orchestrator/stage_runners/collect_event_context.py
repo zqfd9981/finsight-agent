@@ -31,7 +31,7 @@ def run_collect_event_context_stage(
     themes = _normalize_parts(entities.get("themes"))
     time_scope = str(entities.get("time_scope") or "recent").strip()
 
-    # 先取外部背景，再用本地 RAG 补充可追溯证据，保持“背景 + 本地证据”双来源。
+    # 先取事件外部上下文；只有外部结果不足或显式要求时，才补一次本地 RAG。
     external_payload = external_context_retriever.retrieve_event_context(
         query=request.query,
         event=event,
@@ -39,29 +39,35 @@ def run_collect_event_context_stage(
         time_scope=time_scope,
         limit=retrieval_budget,
     ) or {}
-    retrieval_result = retrieval_facade.retrieve_evidence(
-        raw_query=_build_event_context_query(
-            query=request.query,
-            event=event,
-            themes=themes,
-            time_scope=time_scope,
-        ),
-        limit=retrieval_budget,
-    )
+
+    retrieval_result = None
+    if _should_use_local_rag(external_payload):
+        retrieval_result = retrieval_facade.retrieve_evidence(
+            raw_query=_build_event_context_query(
+                query=request.query,
+                event=event,
+                themes=themes,
+                time_scope=time_scope,
+            ),
+            limit=retrieval_budget,
+        )
 
     local_evidence_refs = [
         item.evidence_id
-        for item in retrieval_result.evidence_items
+        for item in (retrieval_result.evidence_items if retrieval_result is not None else [])
         if item.evidence_id
     ]
     external_evidence_refs = _normalize_parts(external_payload.get("evidence_refs"))
     evidence_refs = _deduplicate([*external_evidence_refs, *local_evidence_refs])
+
     supporting_points = _deduplicate(
         [
             *_normalize_parts(external_payload.get("supporting_points")),
             *[
                 item.excerpt.strip()
-                for item in retrieval_result.evidence_items
+                for item in (
+                    retrieval_result.evidence_items if retrieval_result is not None else []
+                )
                 if item.excerpt.strip()
             ],
         ]
@@ -77,6 +83,14 @@ def run_collect_event_context_stage(
     context_summary = "；".join(part for part in summary_parts if part)
     status = "success" if context_summary or evidence_refs else "degraded"
     degraded_reason = None if status == "success" else "event_context_insufficient"
+
+    source_status = dict(external_payload.get("source_status") or {})
+    source_status.update(
+        {
+            "external_used": bool(external_payload),
+            "local_evidence_count": len(local_evidence_refs),
+        }
+    )
 
     event_context = {
         "event": event,
@@ -98,15 +112,31 @@ def run_collect_event_context_stage(
         output_payload={
             "event_context": event_context,
             "event_entities": event_entities,
-            "source_status": {
-                "external_used": bool(external_payload),
-                "local_evidence_count": len(local_evidence_refs),
-            },
+            "source_status": source_status,
         },
         evidence_refs=evidence_refs,
         degraded_reason=degraded_reason,
         user_summary=context_summary or "已拿到有限事件背景，后续分析将按降级路径继续。",
     )
+
+
+def _should_use_local_rag(external_payload: dict[str, object]) -> bool:
+    """仅在外部上下文不足或显式要求时，才补一次本地 RAG。"""
+
+    if not external_payload:
+        return True
+
+    source_status = external_payload.get("source_status")
+    if isinstance(source_status, dict):
+        if source_status.get("local_rag_needed") is True:
+            return True
+        if source_status.get("allow_local_rag") is False:
+            return False
+
+    summary_hint = str(external_payload.get("summary_hint") or "").strip()
+    supporting_points = _normalize_parts(external_payload.get("supporting_points"))
+    evidence_refs = _normalize_parts(external_payload.get("evidence_refs"))
+    return not (summary_hint or supporting_points or evidence_refs)
 
 
 def _build_event_context_query(
