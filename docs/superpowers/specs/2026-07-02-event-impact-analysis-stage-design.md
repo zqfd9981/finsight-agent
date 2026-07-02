@@ -244,7 +244,8 @@
 - `router_result.entities`
 - `collect_event_context.event_context`
 - 可选 `session_context.active_candidates`
-- 结构化候选池
+- 候选池
+- 可选候选发现检索结果
 
 ### `analyze_targets` 输出
 
@@ -362,14 +363,16 @@
 - LLM 主调用 1 次
 - schema 修复最多 1 次
 
-它默认不进行重检索。
+它默认不进行大范围重检索，但在候选池不足时允许 1 轮有界“候选发现检索”。
 
 处理步骤：
 
-1. 从 `collect_event_context`、router entities、session active candidates、主题映射候选中组装候选池
-2. 以结构化输入调用 LLM
-3. 检查输出 schema
-4. 若 schema 不合法，仅允许 1 次修复调用
+1. 从 `collect_event_context`、query 显式目标、router entities、session active candidates 中组装候选池
+2. 若候选池为空或太弱，触发 1 轮候选发现检索
+3. 若补检索后仍无可靠候选，则返回 `degraded`，不伪造股票或板块列表
+4. 若候选池可用，则以结构化输入调用 LLM
+5. 检查输出 schema
+6. 若 schema 不合法，仅允许 1 次修复调用
 
 成功条件：
 
@@ -379,7 +382,9 @@
 
 降级规则：
 
-- 候选池不足但主题明确：允许退化成板块/主题级 `target_scope`
+- 候选池为空时，不允许凭空生成股票候选
+- 候选池不足时，必须先尝试 1 轮候选发现检索
+- 候选发现检索后仍无法形成可靠候选：返回 `degraded`
 - LLM 输出合法但信号不足：允许 `confidence=low`
 - LLM 输出连续两次不合法：返回 `failed`
 
@@ -431,17 +436,46 @@
 
 首版候选池建议来自以下来源：
 
-1. router 的 `themes`
+1. query 中显式提到的公司、板块或目标对象
 2. `collect_event_context` 证据中显式出现的公司、板块、行业词
 3. `session_context.active_candidates`
-4. 本地轻量主题映射表
+4. 候选发现检索补充出的目标对象
 5. 可选结构化数据线索
 
 其中：
 
-- 主题映射表用于提供最小候选集合
+- 候选池的主来源应优先是显式命中对象，而不是先验规则表
 - LLM 用于在候选集合内排序和判断正负方向
-- 不要求首版就构建完整概念股知识图谱
+- 首版不要求构建完整概念股知识图谱
+- 首版不引入“主题映射 -> 直接给股票池”的兜底规则
+
+## 候选发现检索
+
+当 `analyze_targets` 无法从正常输入中组装出最小可用候选池时，应先进行 1 轮有界候选发现检索，而不是直接伪造几个可能受影响的股票。
+
+触发条件：
+
+- 没有公司级候选
+- 只有模糊主题，没有可分析对象
+- 候选数量不足以支持排序和方向判断
+
+首版规则：
+
+- 最多只允许 1 轮候选发现检索
+- 检索目的不是“再讲一遍事件背景”，而是“发现哪些 A 股公司 / 板块被明确提及为相关对象”
+- 应优先选择与事件时效性更匹配的检索方式
+
+推荐策略：
+
+- 近期事件优先用外部工具检索
+- 本地已有语料覆盖较强时优先用本地 RAG
+
+失败处理：
+
+- 候选发现检索后仍无可靠候选时，`analyze_targets` 返回 `degraded`
+- `target_scope` 允许为空
+- `ranked_targets` 允许为空
+- 必须通过 `open_questions` 和 `user_summary` 明确告诉下游与用户：当前只能确认事件背景，尚不能可靠识别具体受影响标的
 
 ## LLM 约束原则
 
@@ -450,7 +484,8 @@ LLM 进入首版主链，但必须受约束：
 1. 不允许脱离候选池自由发散到无限公司集合
 2. 不允许忽略 `collect_event_context` 的事实底座
 3. 输出必须符合固定 schema
-4. 允许返回低置信度和待验证问题，而不是强行给出确定结论
+4. 候选池为空时，不允许凭空生成股票列表
+5. 允许返回低置信度和待验证问题，而不是强行给出确定结论
 
 换句话说，LLM 在本设计里扮演的是“结构化分析器”，不是“自由研究员”。
 
@@ -491,9 +526,10 @@ LLM 进入首版主链，但必须受约束：
 1. `collect_event_context` 在外部成功 / 本地弱时仍能产出最小上下文
 2. `collect_event_context` 在两边都弱时返回 `degraded`
 3. `analyze_targets` 能消费事件上下文并输出标准结构
-4. `analyze_targets` 的 LLM 非法输出会触发一次 schema 修复
-5. `retrieve_evidence` 能消费 `target_scope`
-6. `event_impact_analysis` 从 `route -> plan -> orchestrate -> envelope` 可走通首版真实链路
+4. `analyze_targets` 在候选池不足时会触发 1 轮候选发现检索
+5. `analyze_targets` 的 LLM 非法输出会触发一次 schema 修复
+6. `retrieve_evidence` 能消费 `target_scope`
+7. `event_impact_analysis` 从 `route -> plan -> orchestrate -> envelope` 可走通首版真实链路
 
 首版不强求：
 
@@ -510,6 +546,7 @@ LLM 进入首版主链，但必须受约束：
 - `collect_event_context` runner
 - `analyze_targets` runner
 - 轻量外部检索 provider 抽象
+- 候选发现检索的最小接入点
 - 受约束 LLM 输出 schema
 
 ### 第二阶段
@@ -518,7 +555,7 @@ LLM 进入首版主链，但必须受约束：
 
 - `event_impact_analysis` 端到端测试
 - degraded 结果的 reporting 展示
-- 候选池映射增强
+- 候选发现检索策略增强
 
 ### 第三阶段
 
