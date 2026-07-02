@@ -1,6 +1,6 @@
 # 数据与证据面状态
 
-日期：2026-07-01  
+日期：2026-07-02  
 当前状态：可联调  
 当前负责人：待分配
 
@@ -12,21 +12,18 @@
 ## 2. 当前里程碑
 
 - `Retrieval Pipeline Ready`
+- `Structured Data Ready`
 
 ## 3. 当前阶段结论
 
-retrieval 主链已经不是“准备接线”状态，而是“已被 orchestrator 消费”的状态：
+数据与证据面已经从“准备接线”推进到“稳定被控制面消费”的状态：
 
-- 本地 PDF acquisition、parsing、chunking 已稳定
-- sparse / dense / fusion / rerank / output assembly 已稳定
-- retrieval facade 已能返回结构化 `RetrievalResult`
-- `evidence_lookup` 路径已经通过 orchestrator 与统一 API 真实接线
-
-结构化市场数据能力已进入“真实数据首版闭环”阶段：
-
-- 已完成本地指标库、本地优先查询与外部 fallback 接口
-- `metric_lookup` 已可返回真实结构化数值，不再依赖 `TODO`
-- 当前仍未覆盖更多公司、更多指标和更多期间类型
+- retrieval 主链已稳定支持 `evidence_lookup` 与 `event_impact_analysis`
+- structured data 主链已稳定支持 `metric_lookup`
+- orchestrator 已能同时消费：
+  - 结构化指标查询
+  - 本地 RAG 混合检索
+  - 外部工具检索抽象
 
 ## 4. 当前输出
 
@@ -34,77 +31,71 @@ retrieval 主链已经不是“准备接线”状态，而是“已被 orchestra
 
 - 本地 PDF acquisition
 - parsing + chunking
-- SQLite FTS5 sparse retrieval
-- 本地 Qdrant + 本地 embedding dense retrieval
-- RRF fusion
-- rerank
-- evidence output assembly
+- sparse retrieval
+- dense retrieval
+- fusion / rerank
+- retrieval output assembly
 - `RetrievalResult`
 - retrieval trace
 - parent context expand
 
-### 本轮新增稳定性增强
+### structured data 已完成能力
 
-- retrieval 已被 orchestrator 首版真实消费
-- evidence 路径执行后会关闭 orchestrator 自建 retrieval facade
-- 本地 Qdrant 路径的 collection 重建前会先关闭旧 collection
-- 本地 Qdrant 初始化已跳过会留下告警的临时 `:memory:` SQLite 探测连接
+- 本地财报表格指标抽取
+- 本地指标仓储与查询
+- 本地优先、外部 fallback 的服务层
+- `metric_lookup` 首版真实数值返回
+
+### 本轮新增消费方式
+
+- `collect_event_context` 会结合外部上下文检索与本地 RAG 生成事件背景
+- `retrieve_evidence` 会消费 `collect_event_context` / `analyze_targets` 输出继续补强证据
+- `analyze_targets` 候选池不足时可触发一次外部候选发现检索
 
 ## 5. 活跃任务状态
 
-- 任务：本地 PDF 语料采集
-  状态：已完成
-  说明：双源采集链路已可稳定运行
+- 任务：retrieval 主链稳定化  
+  状态：已完成  
+  说明：已具备可持续回归的单测与集成测试
 
-- 任务：PDF parsing + parent/child chunking
-  状态：已完成
-  说明：已稳定产出 `parents.jsonl` / `children.jsonl`
+- 任务：structured market data 首版闭环  
+  状态：已完成  
+  说明：本地财报表格 -> 指标库 -> 查询服务 -> `metric_lookup` 已打通
 
-- 任务：sparse retrieval
-  状态：已完成
-  说明：SQLite FTS5 检索链可用
+- 任务：事件背景与候选发现检索接线  
+  状态：已完成首版  
+  说明：已具备抽象层与 orchestrator 消费位点
 
-- 任务：dense retrieval
-  状态：已完成
-  说明：本地 embedding + Qdrant 已可用
+- 任务：真实外部 provider 接入  
+  状态：未开始  
+  说明：当前仍以抽象接口与 stub 为主
 
-- 任务：retrieval output assembly
-  状态：已完成
-  说明：`EvidenceItem`、`RetrievalResult`、retrieval trace 已稳定
-
-- 任务：orchestrator 消费 retrieval facade
-  状态：已完成
-  说明：`evidence_lookup` 已从统一入口走真实 retrieval
-
-- 任务：structured market data 真实数据源
-  状态：进行中
-  说明：已完成本地财报表格 -> 内部指标库 -> 本地优先查询闭环，并预留外部 fallback
-
-- 任务：评测样本补齐
-  状态：未开始
-  说明：还缺首批 query / evidence 评测集
+- 任务：评测样本补齐  
+  状态：未开始  
+  说明：仍缺首批事件分析与指标查询联合评测集
 
 ## 6. 当前风险与卡点
 
-- `structured-market-data-support` 已接入首版真实指标源，但仍处于有限覆盖阶段
-- retrieval 评测样本仍不足，回归主要依赖单测与集成测试
+- 外部检索 provider 尚未接入，近期事件覆盖仍有限
+- structured data 的公司、指标与期间覆盖度仍需扩展
+- 事件分析相关的候选发现质量尚缺评测集支撑
 
 ## 7. 不要改什么
 
-- 不要把 retrieval 内部中间态直接暴露给控制面以上层
-- 不要在 retrieval 模块中承担 session / orchestrator 的职责
-- 不要为了 UI 展示去污染 `RetrievalResult` 的边界定义
+- 不要让 retrieval 模块承担 orchestrator 的状态编排职责
+- 不要让 structured data 服务直接暴露内部构建细节给 API boundary
+- 不要把外部 provider 的不稳定返回直接冒充成本地财报真值
 
 ## 8. 下一次阶段检查
 
-1. 检查结构化指标数据是否开始扩展更多公司、指标和期间类型
-2. 检查 retrieval 是否补齐首批评测样本
-3. 检查 evidence follow-up 是否在统一 API 路径下形成真实闭环
+1. 检查首个真实外部检索 provider 是否落地
+2. 检查 structured data 是否扩展到更多指标与期间
+3. 检查事件分析候选发现检索是否有评测样本支撑
 
 ## 9. 完成定义
 
-数据与证据面进入下一阶段的条件：
+数据与证据面下一阶段可视为“进一步完成”的条件：
 
-- retrieval 继续保持稳定可消费
-- `structured-market-data-support` 已具备可持续扩展的真实指标来源体系
-- 补齐首批评测样本与回归验证入口
+- 外部 provider 已具备真实可用的接入实现
+- structured data 覆盖度明显提升
+- retrieval / structured data / event analysis 形成联合评测入口

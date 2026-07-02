@@ -14,10 +14,15 @@ from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
 
+from .context_retriever import (
+    ExternalContextRetriever,
+    NullExternalContextRetriever,
+)
 from .models import OrchestrationResult
 from .observation_builder import build_stage_observation
 from .policies import build_guardrail_response, should_short_circuit
 from .stage_runners import STAGE_RUNNERS
+from .target_analysis import TargetAnalysisService
 from .trace_builder import build_execution_trace_block
 
 
@@ -31,11 +36,17 @@ class OrchestratorService:
         reporting_service: ReportingService | None = None,
         retrieval_facade: RetrievalFacade | None = None,
         retrieval_facade_factory: Callable[[], RetrievalFacade] | None = None,
+        external_context_retriever: ExternalContextRetriever | None = None,
+        target_analysis_service: TargetAnalysisService | None = None,
     ) -> None:
         self._structured_data_service = structured_data_service or StructuredDataService()
         self._reporting_service = reporting_service or ReportingService()
         self._retrieval_facade = retrieval_facade
         self._retrieval_facade_factory = retrieval_facade_factory or build_retrieval_facade
+        self._external_context_retriever = (
+            external_context_retriever or NullExternalContextRetriever()
+        )
+        self._target_analysis_service = target_analysis_service or TargetAnalysisService()
 
     def execute(
         self,
@@ -45,8 +56,6 @@ class OrchestratorService:
         plan: Plan,
         session_context: SessionContext | None,
     ) -> OrchestrationResult:
-        del session_context
-
         result = OrchestrationResult(
             session_id=request.session_id or "sess_stub",
             router_result=router_result,
@@ -80,11 +89,25 @@ class OrchestratorService:
                 }
                 if stage_name == "query_structured_data":
                     runner_kwargs["structured_data_service"] = self._structured_data_service
+                elif stage_name == "collect_event_context":
+                    retrieval_facade, is_owned = self._resolve_retrieval_facade(
+                        cached_facade=owned_retrieval_facade
+                    )
+                    if is_owned and owned_retrieval_facade is None:
+                        owned_retrieval_facade = retrieval_facade
+                    runner_kwargs["retrieval_facade"] = retrieval_facade
+                    runner_kwargs["external_context_retriever"] = self._external_context_retriever
+                elif stage_name == "analyze_targets":
+                    runner_kwargs["session_context"] = session_context
+                    runner_kwargs["external_context_retriever"] = self._external_context_retriever
+                    runner_kwargs["target_analysis_service"] = self._target_analysis_service
                 elif stage_name == "synthesize_brief_answer":
                     runner_kwargs["reporting_service"] = self._reporting_service
                 elif stage_name == "retrieve_evidence":
-                    retrieval_facade, is_owned = self._resolve_retrieval_facade()
-                    if is_owned:
+                    retrieval_facade, is_owned = self._resolve_retrieval_facade(
+                        cached_facade=owned_retrieval_facade
+                    )
+                    if is_owned and owned_retrieval_facade is None:
                         owned_retrieval_facade = retrieval_facade
                     runner_kwargs["retrieval_facade"] = retrieval_facade
                 elif stage_name == "synthesize_report":
@@ -114,7 +137,13 @@ class OrchestratorService:
         result.trace_blocks.append(build_execution_trace_block(result))
         return result
 
-    def _resolve_retrieval_facade(self) -> tuple[RetrievalFacade, bool]:
+    def _resolve_retrieval_facade(
+        self,
+        *,
+        cached_facade: RetrievalFacade | None = None,
+    ) -> tuple[RetrievalFacade, bool]:
+        if cached_facade is not None:
+            return cached_facade, False
         if self._retrieval_facade is not None:
             return self._retrieval_facade, False
         retrieval_facade = self._retrieval_facade_factory()
