@@ -73,6 +73,7 @@ class StubReportingService:
 class StubRetrievalFacade:
     def __init__(self) -> None:
         self.closed = False
+        self.calls: list[dict[str, object]] = []
 
     def retrieve_evidence(
         self,
@@ -84,6 +85,7 @@ class StubRetrievalFacade:
     ):
         from finsight_agent.capabilities.retrieval.models import RetrievalResult
 
+        self.calls.append({"raw_query": raw_query, "limit": limit})
         return RetrievalResult(
             request_id="retrieval_001",
             normalized_claim=raw_query,
@@ -92,6 +94,90 @@ class StubRetrievalFacade:
 
     def close(self) -> None:
         self.closed = True
+
+
+class StubExternalContextRetriever:
+    def __init__(self) -> None:
+        self.context_calls: list[dict[str, object]] = []
+        self.discovery_calls: list[dict[str, object]] = []
+
+    def retrieve_event_context(
+        self,
+        *,
+        query: str,
+        event: str,
+        themes: list[str],
+        time_scope: str,
+        limit: int,
+    ) -> dict[str, object] | None:
+        self.context_calls.append(
+            {
+                "query": query,
+                "event": event,
+                "themes": themes,
+                "time_scope": time_scope,
+                "limit": limit,
+            }
+        )
+        return {
+            "summary_hint": "红海局势升级导致绕航预期升温。",
+            "supporting_points": ["航线扰动可能推升运价。"],
+            "evidence_refs": ["ext_001"],
+        }
+
+    def discover_candidates(
+        self,
+        *,
+        query: str,
+        event_context: dict[str, object],
+        limit: int,
+    ) -> dict[str, object] | None:
+        self.discovery_calls.append(
+            {
+                "query": query,
+                "event_context": event_context,
+                "limit": limit,
+            }
+        )
+        return {
+            "candidates": ["中远海能", "招商轮船"],
+            "evidence_refs": ["ext_002"],
+        }
+
+
+class StubTargetAnalysisService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def analyze_targets(
+        self,
+        *,
+        query: str,
+        event_context: dict[str, object],
+        candidate_pool: list[str],
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "query": query,
+                "event_context": event_context,
+                "candidate_pool": list(candidate_pool),
+            }
+        )
+        return {
+            "target_scope": ["中远海能", "招商轮船"],
+            "ranked_targets": [
+                {
+                    "target": "中远海能",
+                    "target_type": "company",
+                    "impact_direction": "positive",
+                    "reasoning_summary": "若绕航持续，油运弹性可能更明显。",
+                    "confidence": "medium",
+                }
+            ],
+            "open_questions": ["后续仍需核对运价持续性。"],
+            "confidence": "medium",
+            "analysis_mode": "llm_constrained",
+        }
 
 
 class OrchestratorModelsTest(unittest.TestCase):
@@ -155,6 +241,8 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
             structured_data_service=StubStructuredDataService(),
             reporting_service=StubReportingService(),
             retrieval_facade=StubRetrievalFacade(),
+            external_context_retriever=StubExternalContextRetriever(),
+            target_analysis_service=StubTargetAnalysisService(),
         )
 
     def test_execute_metric_lookup_plan_runs_two_stages_and_returns_final_response(self) -> None:
@@ -240,35 +328,61 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
         self.assertEqual(result.guardrail_response.response_type, "guardrail")
         self.assertEqual(result.stage_observations, [])
 
-    def test_execute_raises_for_unsupported_stage(self) -> None:
+    def test_execute_event_impact_analysis_runs_four_stages_and_returns_report(self) -> None:
         router_result = RouterResult(
             intent=Intent.EVENT_IMPACT_ANALYSIS.value,
             follow_up_type=FollowUpType.NONE.value,
             confidence="high",
-            entities={"event": "红海局势升级"},
+            entities={
+                "event": "红海局势升级",
+                "themes": ["航运"],
+                "time_scope": "recent",
+            },
             needs=["news_search"],
             constraints={"preferred_output": "report"},
         )
         plan = Plan(
             plan_id="plan_event_impact_analysis_v1",
             intent=Intent.EVENT_IMPACT_ANALYSIS.value,
-            stages=["collect_event_context"],
+            stages=[
+                "collect_event_context",
+                "analyze_targets",
+                "retrieve_evidence",
+                "synthesize_report",
+            ],
             stage_constraints={
                 "collect_event_context": {"retrieval_budget": 3},
+                "analyze_targets": {"candidate_discovery_budget": 1},
+                "retrieve_evidence": {"retrieval_budget": 4},
+                "synthesize_report": {"preferred_output": "report"},
             },
             response_mode=ResponseMode.REPORT.value,
         )
 
-        with self.assertRaises(KeyError):
-            self.service.execute(
-                request=AnalysisRequest(
-                    query="红海局势升级利好哪些 A 股航运公司？",
-                    session_id="sess_001",
-                ),
-                router_result=router_result,
-                plan=plan,
-                session_context=None,
-            )
+        result = self.service.execute(
+            request=AnalysisRequest(
+                query="红海局势升级利好哪些 A 股航运公司？",
+                session_id="sess_001",
+                include_trace=True,
+            ),
+            router_result=router_result,
+            plan=plan,
+            session_context=None,
+        )
+
+        self.assertIsNotNone(result.final_response)
+        self.assertEqual(result.final_response.response_type, "success")
+        self.assertEqual(
+            [item.stage_name for item in result.stage_observations],
+            [
+                "collect_event_context",
+                "analyze_targets",
+                "retrieve_evidence",
+                "synthesize_report",
+            ],
+        )
+        self.assertIn("中远海能", result.final_response.summary)
+        self.assertEqual(result.trace_blocks[-1].block_type, "execution")
 
     def test_execute_metric_lookup_plan_does_not_build_retrieval_facade(self) -> None:
         retrieval_factory_calls: list[str] = []

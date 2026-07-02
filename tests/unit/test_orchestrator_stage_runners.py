@@ -23,6 +23,7 @@ from finsight_agent.control_plane.orchestrator.models import StageExecutionResul
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
 from shared.contracts.router_result import RouterResult
+from shared.contracts.session_context import SessionContext
 
 
 class _StubStructuredDataService:
@@ -67,6 +68,85 @@ class _StubRetrievalFacade:
             }
         )
         return self.retrieval_result
+
+
+class _StubExternalContextRetriever:
+    def __init__(
+        self,
+        *,
+        event_context_payload: dict[str, object] | None = None,
+        candidate_discovery_payload: dict[str, object] | None = None,
+    ) -> None:
+        self.event_context_payload = event_context_payload
+        self.candidate_discovery_payload = candidate_discovery_payload
+        self.event_calls: list[dict[str, object]] = []
+        self.discovery_calls: list[dict[str, object]] = []
+
+    def retrieve_event_context(
+        self,
+        *,
+        query: str,
+        event: str,
+        themes: list[str],
+        time_scope: str,
+        limit: int,
+    ) -> dict[str, object] | None:
+        self.event_calls.append(
+            {
+                "query": query,
+                "event": event,
+                "themes": themes,
+                "time_scope": time_scope,
+                "limit": limit,
+            }
+        )
+        return self.event_context_payload
+
+    def discover_candidates(
+        self,
+        *,
+        query: str,
+        event_context: dict[str, object],
+        limit: int,
+    ) -> dict[str, object] | None:
+        self.discovery_calls.append(
+            {
+                "query": query,
+                "event_context": event_context,
+                "limit": limit,
+            }
+        )
+        return self.candidate_discovery_payload
+
+
+class _StubTargetAnalysisService:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    def analyze_targets(
+        self,
+        *,
+        query: str,
+        event_context: dict[str, object],
+        candidate_pool: list[str],
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "query": query,
+                "event_context": event_context,
+                "candidate_pool": list(candidate_pool),
+            }
+        )
+        return self.payload
+
+
+class _StubLlmClient:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+
+    def complete_json(self, *, prompt_name: str, variables: dict[str, object]) -> dict[str, object]:
+        return self.payload
 
 
 def _build_router_result(**overrides: object) -> RouterResult:
@@ -132,6 +212,131 @@ def _build_retrieval_result() -> RetrievalResult:
 
 
 class OrchestratorStageRunnersTest(unittest.TestCase):
+    def test_target_analysis_service_rejects_invalid_ranked_targets_payload(self) -> None:
+        from finsight_agent.control_plane.orchestrator.target_analysis import (
+            TargetAnalysisService,
+        )
+
+        service = TargetAnalysisService(llm_client=_StubLlmClient({"target_scope": ["中远海能"]}))
+
+        with self.assertRaises(ValueError):
+            service.analyze_targets(
+                query="红海局势升级利好哪些 A 股航运公司？",
+                event_context={"event": "红海局势升级", "themes": ["航运"]},
+                candidate_pool=["中远海能"],
+            )
+
+    def test_collect_event_context_stage_merges_external_and_local_retrieval(self) -> None:
+        from finsight_agent.control_plane.orchestrator.stage_runners.collect_event_context import (
+            run_collect_event_context_stage,
+        )
+
+        retrieval_result = _build_retrieval_result()
+        facade = _StubRetrievalFacade(retrieval_result)
+        external_retriever = _StubExternalContextRetriever(
+            event_context_payload={
+                "summary_hint": "红海局势升级导致绕航预期升温",
+                "supporting_points": ["航线扰动加剧", "运价弹性上升"],
+                "evidence_refs": ["ext_001"],
+            }
+        )
+
+        result = run_collect_event_context_stage(
+            request=_build_request(query="红海局势升级利好哪些 A 股航运公司？"),
+            router_result=_build_router_result(
+                intent="event_impact_analysis",
+                entities={
+                    "event": "红海局势升级",
+                    "themes": ["航运", "油运"],
+                    "time_scope": "recent",
+                },
+            ),
+            stage_constraints={"retrieval_budget": 3},
+            execution_state={},
+            retrieval_facade=facade,
+            external_context_retriever=external_retriever,
+        )
+
+        self.assertEqual(result.stage_name, "collect_event_context")
+        self.assertEqual(result.status, "success")
+        event_context = result.output_payload["event_context"]
+        self.assertEqual(event_context["event"], "红海局势升级")
+        self.assertEqual(event_context["themes"], ["航运", "油运"])
+        self.assertIn("红海局势升级导致绕航预期升温", event_context["context_summary"])
+        self.assertEqual(result.evidence_refs, ["ext_001", "evd_001"])
+        self.assertEqual(len(external_retriever.event_calls), 1)
+        self.assertEqual(len(facade.calls), 1)
+
+    def test_analyze_targets_stage_returns_degraded_when_candidate_discovery_is_still_empty(self) -> None:
+        from finsight_agent.control_plane.orchestrator.stage_runners.analyze_targets import (
+            run_analyze_targets_stage,
+        )
+
+        external_retriever = _StubExternalContextRetriever(
+            candidate_discovery_payload={"candidates": []}
+        )
+        target_analysis_service = _StubTargetAnalysisService(
+            {
+                "target_scope": ["中远海能"],
+                "ranked_targets": [
+                    {
+                        "target": "中远海能",
+                        "target_type": "company",
+                        "impact_direction": "positive",
+                        "reasoning_summary": "航运运价弹性可能受益。",
+                        "confidence": "medium",
+                    }
+                ],
+            }
+        )
+        execution_state = {
+            "collect_event_context": StageExecutionResult(
+                stage_name="collect_event_context",
+                status="success",
+                output_payload={
+                    "event_context": {
+                        "event": "红海局势升级",
+                        "themes": ["航运"],
+                        "time_scope": "recent",
+                        "context_summary": "事件背景已确认。",
+                        "supporting_points": ["运价弹性上升"],
+                        "evidence_refs": ["evd_001"],
+                    },
+                    "event_entities": {
+                        "event": "红海局势升级",
+                        "themes": ["航运"],
+                        "time_scope": "recent",
+                    },
+                },
+                evidence_refs=["evd_001"],
+            )
+        }
+
+        result = run_analyze_targets_stage(
+            request=_build_request(query="红海局势升级利好哪些 A 股航运公司？"),
+            router_result=_build_router_result(
+                intent="event_impact_analysis",
+                entities={
+                    "event": "红海局势升级",
+                    "themes": ["航运"],
+                    "time_scope": "recent",
+                },
+            ),
+            stage_constraints={"candidate_discovery_budget": 1},
+            execution_state=execution_state,
+            session_context=SessionContext(session_id="sess_001"),
+            external_context_retriever=external_retriever,
+            target_analysis_service=target_analysis_service,
+        )
+
+        self.assertEqual(result.stage_name, "analyze_targets")
+        self.assertEqual(result.status, "degraded")
+        self.assertEqual(result.output_payload["target_scope"], [])
+        self.assertEqual(result.output_payload["ranked_targets"], [])
+        self.assertTrue(result.output_payload["open_questions"])
+        self.assertEqual(len(external_retriever.discovery_calls), 1)
+        self.assertEqual(target_analysis_service.calls, [])
+
     def test_query_structured_data_stage_returns_stage_execution_result(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.query_structured_data import (
             run_query_structured_data_stage,
