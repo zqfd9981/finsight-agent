@@ -91,6 +91,8 @@ def run_collect_event_context_stage(
             "local_evidence_count": len(local_evidence_refs),
         }
     )
+    strategy = str(source_status.get("mode") or "").strip()
+    candidate_hints = _normalize_parts(external_payload.get("candidate_hints"))
 
     event_context = {
         "event": event,
@@ -99,6 +101,7 @@ def run_collect_event_context_stage(
         "context_summary": context_summary,
         "supporting_points": supporting_points,
         "evidence_refs": evidence_refs,
+        "candidate_hints": candidate_hints,
     }
     event_entities = {
         "event": event,
@@ -113,6 +116,7 @@ def run_collect_event_context_stage(
             "event_context": event_context,
             "event_entities": event_entities,
             "source_status": source_status,
+            "strategy": strategy,
         },
         evidence_refs=evidence_refs,
         degraded_reason=degraded_reason,
