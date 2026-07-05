@@ -264,6 +264,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(event_context["event"], "红海局势升级")
         self.assertEqual(event_context["themes"], ["航运", "油运"])
         self.assertIn("红海局势升级导致绕航预期升温", event_context["context_summary"])
+        self.assertEqual(result.output_payload["strategy"], "")
         self.assertEqual(result.evidence_refs, ["ext_001", "evd_001"])
         self.assertEqual(len(external_retriever.event_calls), 1)
         self.assertEqual(len(facade.calls), 1)
@@ -306,6 +307,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(result.evidence_refs, ["gdelt:001", "cninfo:001"])
         self.assertEqual(result.output_payload["source_status"]["local_evidence_count"], 0)
+        self.assertEqual(result.output_payload["strategy"], "dual_primary")
         self.assertEqual(len(external_retriever.event_calls), 1)
         self.assertEqual(facade.calls, [])
 

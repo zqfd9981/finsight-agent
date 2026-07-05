@@ -1,7 +1,7 @@
 # FinSight V1 项目状态
 
-日期：2026-07-02  
-状态：控制面、结构化数据、证据检索与事件主链均已形成首版可运行闭环，项目进入“能力增强与评测补强”阶段。
+日期：2026-07-05  
+状态：控制面、结构化数据、证据检索与事件主链均已形成首版可运行闭环，项目进入“能力增强、评测补强与稳定性优化”阶段。
 
 ## 总览
 
@@ -18,6 +18,7 @@
 - `event_impact_analysis` 已接入首版真实双层外部检索：
   - `GDELT` 事件搜索
   - `CNInfo + SSE` 官方披露搜索
+- `event_impact_analysis` 已新增首版评测样本与 replay 回放框架
 
 ## 里程碑
 
@@ -30,6 +31,7 @@
 | M5 Structured Data Ready | 完成 | `metric_lookup` 已不再依赖占位结果 |
 | M6 Event Chain Ready | 完成 | `event_impact_analysis` 四阶段主链已接通 |
 | M7 External Context Ready | 完成首版 | 双层外部检索已接入事件链 |
+| M8 Event Eval Ready | 完成首版 | 事件样本、回放与最小检查闭环已落地 |
 
 ## 本轮新增成果
 
@@ -43,6 +45,17 @@
   - `OfficialDisclosureSearchProvider`
 - `collect_event_context` 从“固定外部 + 固定本地 RAG”改为“条件 RAG”
 - `OrchestratorService` 默认装配真实 dual-source external retriever
+- 新增 `event_eval` 模块：
+  - fixture schema
+  - replay result schema
+  - replay runner
+  - 确定性 checks
+- 当前可批量观察：
+  - `intent`
+  - 检索策略
+  - 是否降级
+  - 候选数量
+  - 证据引用数量
 
 ## 当前重点风险
 
@@ -56,21 +69,21 @@
 - 训练设计与计划已单独拆出
 - 不阻塞当前事件主链继续演进
 
-### 2. 真实外部检索已接入，但线上鲁棒性尚待评测
+### 2. 真实外部检索已接入，首版评测基线已建立
 
 影响：
 - `GDELT` 与官方披露站检索已能被控制面消费
-- 但命中质量、弱结果降级与不同事件类型的稳定性仍需样本回放验证
+- 且现在已经可以用 replay 样本批量验证命中质量、弱结果降级与不同事件类型的稳定性
 
-### 3. 事件分析评测集仍需建立
+### 3. 事件评测仍处于首版基线阶段
 
 影响：
-- 目前已有单测与集成测试
-- 但系统级事件样本、误判回放与质量门槛仍未形成正式评测体系
+- 当前已具备首批事件样本、回放入口与最小检查项
+- 但样本量、弱结果覆盖、误判门槛和长期趋势分析仍需继续扩展
 
 ## 下一阶段建议
 
-1. 建立 `event_impact_analysis` 首批评测样本与误判回放集
+1. 扩展 `event_impact_analysis` 评测样本规模，补更多弱结果与误判场景
 2. 独立推进 `RetrievalStrategyClassifier` 训练子项目
-3. 扩展结构化数据覆盖范围，补更多公司、指标与期间
-4. 评估是否为外部检索补更多 provider 或缓存策略
+3. 为外部检索补缓存、超时与失败降级策略
+4. 扩展结构化数据覆盖范围，补更多公司、指标与期间
