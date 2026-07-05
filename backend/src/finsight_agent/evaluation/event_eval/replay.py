@@ -20,10 +20,18 @@ class ReplayRunRecord:
     result: ReplayResult
     checks: list[CheckResult]
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "case": self.case.to_dict(),
+            "result": self.result.to_dict(),
+            "checks": [check.to_dict() for check in self.checks],
+        }
+
 
 def replay_event_cases(
     fixture_path: Path,
     *,
+    case_ids: list[str] | None = None,
     service: WorkbenchBackendApiService | None = None,
     include_trace: bool = True,
 ) -> list[ReplayRunRecord]:
@@ -31,7 +39,10 @@ def replay_event_cases(
 
     workbench_service = service or WorkbenchBackendApiService()
     records: list[ReplayRunRecord] = []
+    selected_case_ids = {item for item in (case_ids or []) if item}
     for case in load_event_eval_cases(fixture_path):
+        if selected_case_ids and case.case_id not in selected_case_ids:
+            continue
         envelope = workbench_service.build_response(
             AnalysisRequest(query=case.query, include_trace=include_trace)
         )
