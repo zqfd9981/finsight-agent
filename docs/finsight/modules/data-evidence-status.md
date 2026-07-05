@@ -48,6 +48,8 @@
   - 负责组合 CNInfo + SSE 的官方披露结果
 - `event_eval` replay 框架
   - 负责事件样本回放、最小字段抽取与确定性检查
+- Streamlit `评测视图`
+  - 已可消费 replay summary、records 与 checks
 
 ## 控制面消费方式
 
@@ -67,6 +69,7 @@
 | structured market data 首版闭环 | 已完成 | `metric_lookup` 已接通真实结果 |
 | 双层事件外部检索 provider | 已完成首版 | GDELT + 官方披露搜索已落地 |
 | 外部检索质量回放 | 已完成首版 | 可用于观察 provider 命中、弱结果与候选发现行为 |
+| replay/eval 可视化入口 | 已完成首版 | 内部工作台已可查看回放结果与 checks |
 | structured data 覆盖扩展 | 未开始 | 后续补更多公司、指标、期间 |
 
 ## 当前风险
