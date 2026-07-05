@@ -66,6 +66,15 @@
 - `分析视图` / `调试视图` 复用统一 `analysis/turns` 入口
 - `评测视图` 复用 `event_eval` fixtures、replay 与 checks
 
+### 6. 可启动状态（change `make-workbench-runnable` 之后）
+
+- 工作台已具备可启动入口：
+  - 后端 `python scripts/run_workbench_backend.py`（默认 127.0.0.1:8000）
+  - 前端 `python -m streamlit run frontend/streamlit_app/streamlit_entry.py`（默认 127.0.0.1:8501）
+- 一键起两端：`./scripts/run_workbench.sh`（POSIX / Git Bash）
+- 端口由 `config/app.yaml` 中 `app.workbench.backend_port` / `frontend_port` 驱动，前端 `backend_base_url` 也从同段读
+- 完整启动 / 故障排查见 [operations/workbench-runbook.md](../operations/workbench-runbook.md)
+
 ## 本轮新增
 
 - 新增 `RetrievalStrategyClassifier` 抽象与 stub/fallback

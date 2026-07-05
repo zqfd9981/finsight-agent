@@ -46,13 +46,36 @@ class ProjectSkeletonTest(unittest.TestCase):
             with self.subTest(directory=directory):
                 self.assertFalse((REPO_ROOT / directory).exists())
 
+    def test_workbench_runnable_artifacts_exist(self) -> None:
+        """校验 ``make-workbench-runnable`` change 钉死的关键工作台可启动资产都已落地。"""
+
+        required_artifacts = [
+            "backend/apps/api/app_factory.py",
+            "frontend/streamlit_app/streamlit_entry.py",
+            "frontend/streamlit_app/config_resolver.py",
+            "scripts/run_workbench_backend.py",
+            "scripts/run_workbench_backend.sh",
+            "scripts/run_workbench_frontend.sh",
+            "scripts/run_workbench.sh",
+            "docs/finsight/operations/workbench-runbook.md",
+        ]
+        for relpath in required_artifacts:
+            with self.subTest(artifacts=relpath):
+                self.assertTrue(
+                    (REPO_ROOT / relpath).is_file(),
+                    f"工作台可启动相关文件不存在：{relpath}",
+                )
+
     def test_minimal_fast_path_files_exist(self) -> None:
         """校验前后端分离后的第一版快路径骨架文件已经创建。"""
         required_files = [
             "backend/apps/api/main.py",
             "backend/apps/api/analysis_turns.py",
+            "backend/apps/api/app_factory.py",
             "frontend/streamlit_app/app.py",
             "frontend/streamlit_app/api_client.py",
+            "frontend/streamlit_app/config_resolver.py",
+            "frontend/streamlit_app/streamlit_entry.py",
             "shared/contracts/router_result.py",
             "shared/contracts/plan.py",
             "shared/contracts/session_context.py",
@@ -84,7 +107,11 @@ class ProjectSkeletonTest(unittest.TestCase):
             "fixtures/contracts/analysis_request.follow_up.json",
             "fixtures/contracts/analysis_response_envelope.success.json",
             "docs/finsight/api-boundary-deferred-fields.md",
+            "docs/finsight/operations/workbench-runbook.md",
             "openspec/specs/workbench-backend-api-boundary/spec.md",
+            "scripts/run_workbench_backend.py",
+            "scripts/run_workbench_frontend.sh",
+            "scripts/run_workbench_backend.sh",
         ]
 
         for file_path in required_files:

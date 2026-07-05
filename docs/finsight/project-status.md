@@ -36,6 +36,7 @@
 | M6 Event Chain Ready | 完成 | `event_impact_analysis` 四阶段主链已接通 |
 | M7 External Context Ready | 完成首版 | 双层外部检索已接入事件链 |
 | M8 Event Eval Ready | 完成首版 | 事件样本、回放与最小检查闭环已落地 |
+| M9 Workbench Runnable | 完成首版 | 后端 FastAPI 入口 + Streamlit 工作台已可一键启动；见 [operations/workbench-runbook.md](operations/workbench-runbook.md) |
 
 ## 本轮新增成果
 
