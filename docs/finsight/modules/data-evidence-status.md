@@ -1,8 +1,8 @@
 # 数据与证据面状态
 
-日期：2026-07-05  
-当前状态：可联调  
-阶段结论：结构化数据、本地 RAG、首版外部上下文检索以及对应的 replay 评测基线都已经能被控制面统一消费。
+日期：2026-07-07
+当前状态：可联调
+阶段结论：结构化数据、本地 RAG、首版外部上下文检索以及对应的 replay 评测基线都已经能被控制面统一消费；事件搜索侧已由博查（Bocha）替换 GDELT 作为默认实现。
 
 ## 模块范围
 
@@ -36,10 +36,12 @@
 
 ### 3. 事件外部检索
 
-本轮已新增：
+当前默认实现：
 
-- `BochaEventSearchProvider`
+- `BochaEventSearchProvider`（**当前事件搜索默认 provider**，2026-07-07 由 GDELT 整体替换而来）
   - 负责事件背景、近期资讯与 supporting points
+  - 接入博查（Bocha）Web Search API，urllib-only 网络层
+  - 通过 `EventSearchProvider` Protocol 抽象边界暴露给 orchestrator
 - `CninfoContextSearchProvider`
   - 负责 CNInfo 运行时披露搜索
 - `SseContextSearchProvider`
@@ -50,6 +52,8 @@
   - 负责事件样本回放、最小字段抽取与确定性检查
 - Streamlit `评测视图`
   - 已可消费 replay summary、records 与 checks
+
+**已下线**：原 GDELT 事件搜索 provider 整体下线（源码、单测、根目录 ad-hoc 脚本均删除）；新增 `test_no_gdelt_references_in_production.py` 护栏测试防止 GDELT 回潮。
 
 ## 控制面消费方式
 

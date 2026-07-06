@@ -1,6 +1,6 @@
 # FinSight V1 项目状态
 
-日期：2026-07-05  
+日期：2026-07-07
 状态：控制面、结构化数据、证据检索与事件主链均已形成首版可运行闭环，项目进入“能力增强、评测补强与稳定性优化”阶段。
 
 ## 总览
@@ -37,6 +37,7 @@
 | M7 External Context Ready | 完成首版 | 双层外部检索已接入事件链 |
 | M8 Event Eval Ready | 完成首版 | 事件样本、回放与最小检查闭环已落地 |
 | M9 Workbench Runnable | 完成首版 | 后端 FastAPI 入口 + Streamlit 工作台已可一键启动；见 [operations/workbench-runbook.md](operations/workbench-runbook.md) |
+| M10 Event Search Replace | 完成首版 | 事件搜索 provider 由 GDELT 整体替换为博查（Bocha）Web Search API；新增 `EventSearchProvider` Protocol 抽象边界；新增护栏测试防 GDELT 回潮；见 [specs/2026-07-06-bocha-event-search-replace-gdelt-design.md](../superpowers/specs/2026-07-06-bocha-event-search-replace-gdelt-design.md) |
 
 ## 本轮新增成果
 
@@ -48,6 +49,12 @@
   - `CninfoContextSearchProvider`
   - `SseContextSearchProvider`
   - `OfficialDisclosureSearchProvider`
+- 事件搜索 provider 由 GDELT 整体替换为博查（Bocha）Web Search API：
+  - 新增 `EventSearchProvider` Protocol 抽象边界（与现有 `ExternalContextRetriever` Protocol 同侧）
+  - `OrchestratorService` 默认装配改用 Bocha；缺失 `BOCHA_API_KEY` 时构造期抛 `RuntimeError`
+  - 删除 GDELT 源码、单测、根目录 2 个 ad-hoc 脚本
+  - 新增护栏测试 `test_no_gdelt_references_in_production.py` 防止 GDELT 回潮
+  - 新增根目录 `test_bocha.py` 冒烟脚本（不进 CI）
 - `collect_event_context` 从“固定外部 + 固定本地 RAG”改为“条件 RAG”
 - `OrchestratorService` 默认装配真实 dual-source external retriever
 - 新增 `event_eval` 模块：
@@ -89,6 +96,12 @@
 影响：
 - 当前已具备首批事件样本、回放入口与最小检查项
 - 但样本量、弱结果覆盖、误判门槛和长期趋势分析仍需继续扩展
+
+### 4. 事件搜索单点依赖博查（Bocha）
+
+影响：
+- `event_impact_analysis` 的外部事件背景完全依赖博查 Web Search API；key 缺失 / 配额耗尽 / 429 限流时降级到披露源 + 本地 RAG，但仍可能出现事件背景薄弱
+- 当前未做重试 / 缓存 / 熔断；首次查询期失败语义清晰，但长期稳定性需要更多真实流量验证
 
 ## 下一阶段建议
 

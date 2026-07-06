@@ -1,7 +1,7 @@
 # 控制面状态
 
-日期：2026-07-05  
-当前状态：进行中  
+日期：2026-07-07
+当前状态：进行中
 阶段结论：控制面已完成三类主链的首版真实编排，并已具备事件样本回放能力，当前重点从“主链接线”转向“检索质量、分类器与评测增强”。
 
 ## 模块范围
@@ -82,6 +82,12 @@
 - 新增 `DualSourceExternalContextRetriever`
 - `OrchestratorService` 默认装配真实 dual-source external retriever
 - 新增 `event_impact_analysis` replay 回放框架，可批量观察策略、降级与候选结果
+- 事件搜索 provider 由 GDELT 整体替换为博查（Bocha）Web Search API：
+  - 新增 `EventSearchProvider` Protocol 抽象边界（与现有 `ExternalContextRetriever` Protocol 同侧，符合 consumer-owned 风格）
+  - `OrchestratorService` 默认装配改用 `BochaEventSearchProvider`；缺失 `BOCHA_API_KEY` 时构造期抛 `RuntimeError`
+  - 删除 GDELT 源码、单测、根目录 2 个 ad-hoc 脚本
+  - 新增护栏测试 `test_no_gdelt_references_in_production.py` 扫描 `backend/src/finsight_agent/` 防 GDELT 回潮
+  - 新增根目录 `test_bocha.py` 冒烟脚本（不进 CI）
 
 ## 活跃任务状态
 
@@ -90,7 +96,7 @@
 | `semantic-routing-and-planning` 首版规则实现 | 已完成 | 已稳定驱动真实主链 |
 | `SessionContext` 首版真实接线 | 已完成 | follow-up 已可真实续接 |
 | `event_impact_analysis` 首版四阶段接线 | 已完成 | 事件链可真实执行 |
-| 双层外部上下文检索接入 | 已完成首版 | 已接入 Bocha + 官方披露搜索 |
+| 双层外部上下文检索接入 | 已完成首版 | 已接入 Bocha（替换原 GDELT）+ 官方披露搜索；新增 `EventSearchProvider` Protocol 抽象边界 |
 | 事件分析评测样本与回放 | 已完成首版 | 可批量回放事件 query，并观测策略与降级结果 |
 | Streamlit 调试/评测工作台 | 已完成首版 | 已具备分析、调试、评测三视图骨架 |
 | 检索策略分类器训练 | 未开始实现 | 已单独拆成训练子项目，不阻塞主链 |
@@ -101,6 +107,7 @@
 1. `RetrievalStrategyClassifier` 仍是 stub/fallback，真实小模型分类尚未接入主流程。
 2. 双层外部检索虽然已建立 replay 基线，但样本规模和弱结果覆盖仍不足。
 3. `analyze_targets` 已可批量回放，但目标发现质量仍需更多真实事件样本观察。
+4. 事件搜索单点依赖博查：未做重试 / 缓存 / 熔断；key 缺失或 429 限流时降级到披露源 + 本地 RAG，事件背景可能偏薄；详见 [operations/workbench-runbook.md §5.2](../operations/workbench-runbook.md)。
 
 ## 下一步建议
 
