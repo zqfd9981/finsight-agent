@@ -33,6 +33,18 @@ class EventEvalCase:
             notes=str(payload.get("notes") or "").strip() or None,
         )
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "case_id": self.case_id,
+            "query": self.query,
+            "expected_intent": self.expected_intent,
+            "expected_strategy": self.expected_strategy,
+            "allow_degraded": self.allow_degraded,
+            "min_target_count": self.min_target_count,
+            "expected_target_keywords": list(self.expected_target_keywords),
+            "notes": self.notes,
+        }
+
 
 @dataclass(slots=True)
 class ReplayResult:
@@ -73,3 +85,10 @@ class CheckResult:
     check_name: str
     status: str
     message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "check_name": self.check_name,
+            "status": self.status,
+            "message": self.message,
+        }

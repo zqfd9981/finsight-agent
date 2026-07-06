@@ -19,6 +19,10 @@
   - `GDELT` 事件搜索
   - `CNInfo + SSE` 官方披露搜索
 - `event_impact_analysis` 已新增首版评测样本与 replay 回放框架
+- Streamlit 内部工作台已具备首版三视图骨架：
+  - `分析视图`
+  - `调试视图`
+  - `评测视图`
 
 ## 里程碑
 
@@ -50,6 +54,10 @@
   - replay result schema
   - replay runner
   - 确定性 checks
+- 新增 Streamlit 工作台最小可视化骨架：
+  - `分析视图` 复用统一 `analysis/turns` 入口
+  - `调试视图` 可查看 route / plan / execution
+  - `评测视图` 可查看 replay summary、records 与 checks
 - 当前可批量观察：
   - `intent`
   - 检索策略
