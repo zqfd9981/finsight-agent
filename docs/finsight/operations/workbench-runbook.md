@@ -123,17 +123,23 @@ app:
 - 或找到占用进程：`netstat -ano | findstr :8000`（Win）/ `lsof -i :8000`（POSIX）
 - 或停掉占用方
 
-### 5.2 真实 event_impact_analysis 查询失败 / GDELT 429
+### 5.2 真实 event_impact_analysis 查询失败 / Bocha 调用异常
 
-**症状**：在「分析视图」发起 `event_impact_analysis` 相关查询后，看到下游错误或长时间卡住。
+**症状**：在「分析视图」发起 `event_impact_analysis` 相关查询后，trace 中 `source_status.event_search` 显示 `bocha_used: false` 或结果明显稀疏；后端启动日志可能含 `RuntimeError("BOCHA_API_KEY is required: ...")`。
 
-**原因**：当前 change **未**为外部检索加超时 / 缓存 / 降级。GDELT 公共接口可能因频率限制返回 429。
+**原因**：博查（Bocha）Web Search API 调用失败，可能由 key 缺失、配额耗尽、429 限流、网络超时等触发。
 
 **对策**：
 
-- 这是已知遗留，参见 [`openspec/changes/make-workbench-runnable/design.md`](../../changes/make-workbench-runnable/design.md) R1
-- 推荐下一份 change：补 FastAPI 端超时 + GDELT 缓存 + fallback
-- 临时绕路：先在「分析视图」跑 metric_lookup / evidence_lookup 类问题（不触发事件检索）
+1. 确认 `BOCHA_API_KEY` 环境变量已设置（启动期 `RuntimeError` 多半是这个原因）
+2. 登录博查开放平台确认 key 有效、账户配额未耗尽
+3. 触发 429 时无需手动干预：实现层已把 Bocha 失败翻译成空 result，`DualSourceExternalContextRetriever` 会自动切到 `disclosure_search`（巨潮 + 上交所），再不足则触发本地 RAG 兜底
+4. 持续异常时手动跑根目录 `test_bocha.py` 做连通性 smoke：
+   ```bash
+   BOCHA_API_KEY=<key> python test_bocha.py --query "红海局势升级 航运" --limit 3
+   ```
+
+**后续可演进**：本 change 不做 Bocha 重试 / 缓存 / 熔断；如限流频繁，下一份 change 可在 `BochaHttpFetcher` 上加指数退避装饰器。
 
 ### 5.3 前端报 `RuntimeError: backend POST ... failed`
 

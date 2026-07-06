@@ -38,7 +38,7 @@
 
 本轮已新增：
 
-- `GdeltEventSearchProvider`
+- `BochaEventSearchProvider`
   - 负责事件背景、近期资讯与 supporting points
 - `CninfoContextSearchProvider`
   - 负责 CNInfo 运行时披露搜索
@@ -67,7 +67,7 @@
 | --- | --- | --- |
 | retrieval 主链稳定化 | 已完成 | 已可稳定被 `evidence_lookup` / `event_impact_analysis` 消费 |
 | structured market data 首版闭环 | 已完成 | `metric_lookup` 已接通真实结果 |
-| 双层事件外部检索 provider | 已完成首版 | GDELT + 官方披露搜索已落地 |
+| 双层事件外部检索 provider | 已完成首版 | Bocha + 官方披露搜索已落地 |
 | 外部检索质量回放 | 已完成首版 | 可用于观察 provider 命中、弱结果与候选发现行为 |
 | replay/eval 可视化入口 | 已完成首版 | 内部工作台已可查看回放结果与 checks |
 | structured data 覆盖扩展 | 未开始 | 后续补更多公司、指标、期间 |
@@ -80,6 +80,6 @@
 
 ## 下一步建议
 
-1. 扩展 `GDELT + 官方披露` 的事件样本回放和弱结果评测
+1. 扩展 `Bocha + 官方披露` 的事件样本回放和弱结果评测
 2. 为 provider 增加缓存、超时和失败降级策略
 3. 持续扩展本地指标库覆盖范围

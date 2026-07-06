@@ -16,7 +16,7 @@
   - `evidence_lookup`
   - `event_impact_analysis`
 - `event_impact_analysis` 已接入首版真实双层外部检索：
-  - `GDELT` 事件搜索
+  - `Bocha` 事件搜索
   - `CNInfo + SSE` 官方披露搜索
 - `event_impact_analysis` 已新增首版评测样本与 replay 回放框架
 - Streamlit 内部工作台已具备首版三视图骨架：
@@ -44,7 +44,7 @@
 - 新增 `ContextRetrievalPlanner`
 - 新增双层外部检索组合器 `DualSourceExternalContextRetriever`
 - 新增真实 provider：
-  - `GdeltEventSearchProvider`
+  - `BochaEventSearchProvider`
   - `CninfoContextSearchProvider`
   - `SseContextSearchProvider`
   - `OfficialDisclosureSearchProvider`
@@ -81,7 +81,7 @@
 ### 2. 真实外部检索已接入，首版评测基线已建立
 
 影响：
-- `GDELT` 与官方披露站检索已能被控制面消费
+- `Bocha` 与官方披露站检索已能被控制面消费
 - 且现在已经可以用 replay 样本批量验证命中质量、弱结果降级与不同事件类型的稳定性
 
 ### 3. 事件评测仍处于首版基线阶段

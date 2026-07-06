@@ -14,7 +14,7 @@ from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
 
-from finsight_agent.infra.external.gdelt_event_search import GdeltEventSearchProvider
+from finsight_agent.infra.external.bocha_event_search import BochaEventSearchProvider
 from finsight_agent.infra.external.official_disclosure_search import (
     OfficialDisclosureSearchProvider,
 )
@@ -158,6 +158,6 @@ def _build_default_external_context_retriever() -> DualSourceExternalContextRetr
     return DualSourceExternalContextRetriever(
         classifier=StubRetrievalStrategyClassifier(),
         planner=ContextRetrievalPlanner(),
-        event_search_provider=GdeltEventSearchProvider(),
+        event_search_provider=BochaEventSearchProvider(),
         disclosure_search_provider=OfficialDisclosureSearchProvider(),
     )

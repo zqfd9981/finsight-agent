@@ -112,6 +112,9 @@ class ProjectSkeletonTest(unittest.TestCase):
             "scripts/run_workbench_backend.py",
             "scripts/run_workbench_frontend.sh",
             "scripts/run_workbench_backend.sh",
+            "backend/src/finsight_agent/control_plane/orchestrator/event_search_provider.py",
+            "backend/src/finsight_agent/infra/external/bocha_event_search.py",
+            "tests/unit/test_bocha_event_search.py",
         ]
 
         for file_path in required_files:
