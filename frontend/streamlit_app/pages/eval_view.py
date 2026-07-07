@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from frontend.streamlit_app.state.models import EventEvalCaseView, EventReplayRecordView, EventReplayRunView
+import streamlit as st
+
+from frontend.streamlit_app.api_client import WorkbenchApiClient
+from frontend.streamlit_app.state.models import (
+    EventEvalCaseView,
+    EventReplayRecordView,
+    EventReplayRunView,
+)
 
 
 def build_eval_view_model(
@@ -68,3 +75,44 @@ def build_eval_view_model(
         "records": filtered_records,
         "selected_detail": selected_detail,
     }
+
+
+def render_eval_view(client: WorkbenchApiClient) -> None:
+    """评测视图渲染壳：拉样本 → 多选 → replay → 渲染 summary + records。"""
+
+    cases_key = "_eval_cases"
+    run_key = "_eval_run"
+
+    st.subheader("评测视图")
+    if st.button("刷新样本列表"):
+        try:
+            st.session_state[cases_key] = client.fetch_event_cases()
+            st.session_state[run_key] = None
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"获取样本失败：{exc}")
+
+    cases: list[EventEvalCaseView] = st.session_state.get(cases_key, [])
+    case_ids = [case.case_id for case in cases]
+    selected = st.multiselect("选择 case_id（可多选）", case_ids)
+
+    if st.button("运行 replay"):
+        if not selected:
+            st.warning("请先选择至少一个 case_id")
+        else:
+            try:
+                st.session_state[run_key] = client.fetch_event_replay(case_ids=selected)
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"replay 失败：{exc}")
+
+    run: EventReplayRunView | None = st.session_state.get(run_key)
+    if run is not None:
+        model = build_eval_view_model(run, cases=cases)
+        st.json(model["summary"])
+        records = model.get("records") or []
+        if records:
+            st.dataframe(records)
+        else:
+            st.caption("（无可显示的 records）")
+        if model.get("selected_detail"):
+            st.markdown("**选中 case 详情：**")
+            st.json(model["selected_detail"])

@@ -80,5 +80,92 @@ class StreamlitApiClientTest(unittest.TestCase):
         self.assertEqual(replay.records[0].result.actual_strategy, "dual_primary")
 
 
+class WorkbenchApiClientHttpTest(unittest.TestCase):
+    def test_send_request_posts_to_resolved_backend_base_url(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from shared.contracts.analysis_response_envelope import (
+            AnalysisResponseEnvelope,
+        )
+
+        fake_response = MagicMock()
+        fake_response.ok = True
+        fake_response.status_code = 200
+        fake_response.json.return_value = {
+            "version": "v1",
+            "session_id": "sess_x",
+            "turn_id": "turn_stub",
+            "response": {
+                "response_type": "success",
+                "session_id": "sess_x",
+                "summary": "ok",
+                "report_blocks": [],
+            },
+            "trace_blocks": [],
+            "notes": None,
+        }
+
+        client = WorkbenchApiClient(
+            backend_base_url="http://10.0.0.5:9000",
+            endpoint_path="/api/v1/analysis/turns",
+        )
+
+        with patch(
+            "frontend.streamlit_app.api_client.requests.post",
+            return_value=fake_response,
+        ) as patched:
+            envelope = client.send_request(query="hello")
+
+        called_url = patched.call_args.args[0]
+        self.assertEqual(called_url, "http://10.0.0.5:9000/api/v1/analysis/turns")
+        self.assertIsInstance(envelope, AnalysisResponseEnvelope)
+        self.assertEqual(envelope.session_id, "sess_x")
+
+    def test_send_request_raises_on_non_2xx(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        fake_response = MagicMock()
+        fake_response.ok = False
+        fake_response.status_code = 500
+        fake_response.text = "boom"
+
+        client = WorkbenchApiClient(backend_base_url="http://h:1")
+
+        with patch(
+            "frontend.streamlit_app.api_client.requests.post",
+            return_value=fake_response,
+        ):
+            with self.assertRaises(RuntimeError):
+                client.send_request(query="hi")
+
+    def test_fetch_event_replay_round_trip(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from frontend.streamlit_app.state.models import EventReplayRunView
+
+        fake_response = MagicMock()
+        fake_response.ok = True
+        fake_response.status_code = 200
+        fake_response.json.return_value = {
+            "summary": {"total": 0, "pass": 0, "warn": 0, "fail": 0},
+            "records": [],
+        }
+
+        client = WorkbenchApiClient(backend_base_url="http://h:1")
+
+        with patch(
+            "frontend.streamlit_app.api_client.requests.post",
+            return_value=fake_response,
+        ) as patched:
+            view = client.fetch_event_replay(case_ids=["stub"])
+
+        called_url = patched.call_args.args[0]
+        self.assertEqual(
+            called_url, "http://h:1/api/v1/eval/event-replay"
+        )
+        self.assertIsInstance(view, EventReplayRunView)
+        self.assertEqual(view.summary.total, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

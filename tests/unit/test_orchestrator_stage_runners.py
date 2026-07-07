@@ -279,7 +279,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
             event_context_payload={
                 "summary_hint": "红海局势升级已经形成清晰事件背景。",
                 "supporting_points": ["航线绕行预期上升", "运价弹性仍在持续发酵"],
-                "evidence_refs": ["gdelt:001", "cninfo:001"],
+                "evidence_refs": ["bocha:001", "cninfo:001"],
                 "source_status": {
                     "mode": "dual_primary",
                     "allow_local_rag": False,
@@ -305,7 +305,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
 
         self.assertEqual(result.stage_name, "collect_event_context")
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.evidence_refs, ["gdelt:001", "cninfo:001"])
+        self.assertEqual(result.evidence_refs, ["bocha:001", "cninfo:001"])
         self.assertEqual(result.output_payload["source_status"]["local_evidence_count"], 0)
         self.assertEqual(result.output_payload["strategy"], "dual_primary")
         self.assertEqual(len(external_retriever.event_calls), 1)

@@ -52,7 +52,7 @@ class ContextRetrievalModelsTest(unittest.TestCase):
 
         item = ExternalContextItem(
             title="红海局势升级影响航线",
-            source="gdelt",
+            source="bocha",
             publish_date="2026-07-02",
             url="https://example.com/a",
             snippet="航线扰动加剧。",
@@ -64,9 +64,9 @@ class ContextRetrievalModelsTest(unittest.TestCase):
             items=[item],
             summary_hint="事件背景已提炼",
             supporting_points=["航线扰动加剧"],
-            evidence_refs=["gdelt:item_001"],
+            evidence_refs=["bocha:item_001"],
             candidate_hints=["航运"],
-            source_status={"gdelt_used": True},
+            source_status={"bocha_used": True},
         )
         plan = ContextRetrievalPlan(
             mode="event_primary",
@@ -74,7 +74,7 @@ class ContextRetrievalModelsTest(unittest.TestCase):
             allow_local_rag=False,
         )
 
-        self.assertEqual(result.items[0].source, "gdelt")
+        self.assertEqual(result.items[0].source, "bocha")
         self.assertEqual(plan.mode, "event_primary")
         self.assertFalse(plan.allow_local_rag)
 
@@ -135,7 +135,7 @@ class DualSourceExternalContextRetrieverTest(unittest.TestCase):
             event_search_provider=_StubEventProvider(
                 ExternalContextResult(
                     summary_hint="事件背景",
-                    evidence_refs=["gdelt:1"],
+                    evidence_refs=["bocha:1"],
                     supporting_points=["事件点1"],
                 )
             ),
@@ -158,7 +158,7 @@ class DualSourceExternalContextRetrieverTest(unittest.TestCase):
         )
 
         self.assertEqual(result["source_status"]["mode"], "dual_primary")
-        self.assertEqual(result["evidence_refs"], ["gdelt:1", "cninfo:1"])
+        self.assertEqual(result["evidence_refs"], ["bocha:1", "cninfo:1"])
         self.assertEqual(result["candidate_hints"], ["中远海能"])
 
     def test_discover_candidates_uses_disclosure_provider_query(self) -> None:
