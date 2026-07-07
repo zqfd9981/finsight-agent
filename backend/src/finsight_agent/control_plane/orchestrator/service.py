@@ -25,6 +25,7 @@ from .models import OrchestrationResult
 from .observation_builder import build_stage_observation
 from .policies import build_guardrail_response, should_short_circuit
 from .retrieval_strategy_classifier import StubRetrievalStrategyClassifier
+from .trained_strategy_classifier import TrainedRetrievalStrategyClassifier
 from .stage_runners import STAGE_RUNNERS
 from .target_analysis import TargetAnalysisService
 from .trace_builder import build_execution_trace_block
@@ -153,10 +154,16 @@ class OrchestratorService:
 
 
 def _build_default_external_context_retriever() -> DualSourceExternalContextRetriever:
-    """默认装配免费的双源外部上下文检索链路。"""
+    """默认装配免费的双源外部上下文检索链路。
+
+    策略分类器默认注入 ``TrainedRetrievalStrategyClassifier``；模型缺失 / 加载失败 /
+    推理异常时自动回退到 ``StubRetrievalStrategyClassifier``，行为与历史完全一致。
+    """
 
     return DualSourceExternalContextRetriever(
-        classifier=StubRetrievalStrategyClassifier(),
+        classifier=TrainedRetrievalStrategyClassifier(
+            fallback=StubRetrievalStrategyClassifier(),
+        ),
         planner=ContextRetrievalPlanner(),
         event_search_provider=BochaEventSearchProvider(),
         disclosure_search_provider=OfficialDisclosureSearchProvider(),

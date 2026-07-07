@@ -54,10 +54,20 @@ class DualSourceExternalContextRetriever(ExternalContextRetriever):
             router_payload=router_payload,
         )
 
+        # 透传 classifier 决策到 source_status，让上游可观察实际走的策略来源
+        reason_value = str(strategy_payload.get("reason") or "")
+        strategy_source = (
+            "stub_fallback"
+            if reason_value.startswith("stub_fallback")
+            else "trained"
+        )
         merged = ExternalContextResult(
             source_status={
                 "mode": plan.mode or DEFAULT_RETRIEVAL_STRATEGY,
                 "allow_local_rag": plan.allow_local_rag,
+                "strategy_reason": reason_value,
+                "strategy_confidence": str(strategy_payload.get("confidence") or "low"),
+                "strategy_source": strategy_source,
             }
         )
 

@@ -42,3 +42,9 @@ runtime/
 /简介关系图.png
 /项目架构流程.md
 /项目框架结构约定.md
+
+# 检索策略分类器训练产物（模型权重）
+backend/training/finsight_agent_training/retrieval_strategy_classifier/artifacts/
+*.bin
+*.safetensors
+tokenizer.json
