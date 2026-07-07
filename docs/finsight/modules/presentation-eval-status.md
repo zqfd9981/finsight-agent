@@ -33,6 +33,12 @@
 - `TraceBlock` 骨架
 - `AnalysisResponseEnvelope` 与 workbench client 骨架
 
+### 可启动状态（change `make-workbench-runnable` 之后）
+
+- `analysis-workbench` 页面层已具备真实 `render_*` 调用，能在浏览器拉起后看到并交互
+- 评测侧 `event_eval` 仍由现有 fixtures + replay + checks 兜底；评测页面（`评测视图`）现在能通过 FastAPI 路由 `/api/v1/eval/event-replay` 真正下发
+- 完整启动方式与故障排查见 [operations/workbench-runbook.md](../operations/workbench-runbook.md)
+
 ## 6. 活跃任务
 
 - 任务：`FinalResponse` success 渲染

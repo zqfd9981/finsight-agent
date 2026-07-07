@@ -1,124 +1,116 @@
 # 控制面状态
 
-日期：2026-07-02  
-当前状态：进行中  
-当前负责人：待分配
+日期：2026-07-07
+当前状态：进行中
+阶段结论：控制面已完成三类主链的首版真实编排，并已具备事件样本回放能力，当前重点从“主链接线”转向“检索质量、分类器与评测增强”。
 
-## 1. 模块范围
+## 模块范围
 
-- `conversation-session-state`
 - `semantic-routing-and-planning`
+- `conversation-session-state`
 - `event-analysis-orchestration`
 
-## 2. 当前里程碑
+## 当前能力
 
-- `semantic-routing-and-planning` 首版完成
-- `conversation-session-state` 首版完成
-- `event-analysis-orchestration` 首版四阶段事件主链完成
-
-## 3. 当前阶段结论
-
-控制面目前已经不再只是“短路径接线”，而是具备了三类真实执行链：
-
-- `metric_lookup`
-  - `query_structured_data`
-  - `synthesize_brief_answer`
-- `evidence_lookup`
-  - `retrieve_evidence`
-  - `synthesize_report`
-- `event_impact_analysis`
-  - `collect_event_context`
-  - `analyze_targets`
-  - `retrieve_evidence`
-  - `synthesize_report`
-
-其中 `event_impact_analysis` 的新增能力包括：
-
-- 外部上下文检索抽象
-- 受约束 LLM 目标分析服务
-- 候选池不足时的一次有界候选发现检索
-- 候选仍不足时的诚实降级，不伪造股票池
-
-## 4. 当前输出
-
-### semantic routing / planning
+### 1. Router / Planner
 
 - `RouterService` 已稳定输出：
   - `metric_lookup`
-  - `event_impact_analysis`
   - `evidence_lookup`
+  - `event_impact_analysis`
   - `out_of_scope`
 - `PlannerService` 已稳定输出：
   - `metric_lookup` 两阶段计划
   - `evidence_lookup` 两阶段计划
   - `event_impact_analysis` 四阶段计划
 
-### event-analysis-orchestration
+### 2. Orchestrator
 
-- `OrchestratorService` 已支持真实执行：
-  - `collect_event_context`
-  - `analyze_targets`
+- `OrchestratorService` 已稳定执行：
   - `query_structured_data`
   - `synthesize_brief_answer`
+  - `collect_event_context`
+  - `analyze_targets`
   - `retrieve_evidence`
   - `synthesize_report`
 - 已支持：
   - `out_of_scope` 短路
-  - execution trace
   - `StageObservation`
-  - retrieval facade 懒加载与执行后关闭
+  - execution trace
+  - retrieval facade 懒加载与生命周期关闭
 
-### 统一入口接线
+### 3. Session
 
-- `WorkbenchBackendApiService` 已走真实链路：
-  - `route -> plan -> orchestrate -> envelope`
-- `SessionContext` 已在统一入口真实加载与保存
-- `event_impact_analysis` 已有端到端集成测试覆盖
+- `SessionContext` 已接入统一入口
+- 已支持：
+  - snapshot 持久化
+  - follow-up 上下文加载
+  - rolling summary
 
-## 5. 活跃任务状态
+### 4. 事件主链新增能力
 
-- 任务：`semantic-routing-and-planning` 首版规则实现  
-  状态：已完成  
-  说明：已稳定支撑最小真实链路
+- `event_impact_analysis` 已具备完整四阶段执行链
+- `collect_event_context` 已改为：
+  - 双层外部检索优先
+  - 本地 RAG 条件补充
+- `analyze_targets` 已支持：
+  - 候选池不足时补 1 轮候选发现检索
+  - 仍不足时诚实降级，不伪造股票池
 
-- 任务：`SessionContext` 首版真实接线  
-  状态：已完成  
-  说明：已支持 follow-up 读取压缩上下文与 rolling summary
+### 5. Streamlit 内部工作台
 
-- 任务：`event_impact_analysis` 首版四阶段接线  
-  状态：已完成  
-  说明：事件背景收集、目标分析、证据补强、报告生成已可真实串联
+- 已具备三类视图骨架：
+  - `分析视图`
+  - `调试视图`
+  - `评测视图`
+- `分析视图` / `调试视图` 复用统一 `analysis/turns` 入口
+- `评测视图` 复用 `event_eval` fixtures、replay 与 checks
 
-- 任务：真实外部工具 provider 接入  
-  状态：未开始  
-  说明：当前仅完成抽象层与 stub 级接线
+### 6. 可启动状态（change `make-workbench-runnable` 之后）
 
-- 任务：事件分析评测与回归集  
-  状态：未开始  
-  说明：当前以单测和集成测试为主
+- 工作台已具备可启动入口：
+  - 后端 `python scripts/run_workbench_backend.py`（默认 127.0.0.1:8000）
+  - 前端 `python -m streamlit run frontend/streamlit_app/streamlit_entry.py`（默认 127.0.0.1:8501）
+- 一键起两端：`./scripts/run_workbench.sh`（POSIX / Git Bash）
+- 端口由 `config/app.yaml` 中 `app.workbench.backend_port` / `frontend_port` 驱动，前端 `backend_base_url` 也从同段读
+- 完整启动 / 故障排查见 [operations/workbench-runbook.md](../operations/workbench-runbook.md)
 
-## 6. 当前风险与卡点
+## 本轮新增
 
-- 外部工具检索尚未接入真实 provider，近期事件的时效性仍有限
-- `analyze_targets` 已接入受约束 LLM，但仍缺系统化评测样本
-- 事件分析结果目前更偏“首版可运行链”，精细排序和覆盖度仍需迭代
+- 新增 `RetrievalStrategyClassifier` 抽象与 stub/fallback
+- 新增 `ContextRetrievalPlanner`
+- 新增 `DualSourceExternalContextRetriever`
+- `OrchestratorService` 默认装配真实 dual-source external retriever
+- 新增 `event_impact_analysis` replay 回放框架，可批量观察策略、降级与候选结果
+- 事件搜索 provider 由 GDELT 整体替换为博查（Bocha）Web Search API：
+  - 新增 `EventSearchProvider` Protocol 抽象边界（与现有 `ExternalContextRetriever` Protocol 同侧，符合 consumer-owned 风格）
+  - `OrchestratorService` 默认装配改用 `BochaEventSearchProvider`；缺失 `BOCHA_API_KEY` 时构造期抛 `RuntimeError`
+  - 删除 GDELT 源码、单测、根目录 2 个 ad-hoc 脚本
+  - 新增护栏测试 `test_no_gdelt_references_in_production.py` 扫描 `backend/src/finsight_agent/` 防 GDELT 回潮
+  - 新增根目录 `test_bocha.py` 冒烟脚本（不进 CI）
 
-## 7. 不要改什么
+## 活跃任务状态
 
-- 不要在 orchestrator 中重新定义 router / planner / retrieval 的 contract 主权
-- 不要让 `analyze_targets` 在候选池为空时直接自由生成股票列表
-- 不要让 report 层私自扩展新的 block contract，而绕过 shared contract 演进
+| 任务 | 状态 | 说明 |
+| --- | --- | --- |
+| `semantic-routing-and-planning` 首版规则实现 | 已完成 | 已稳定驱动真实主链 |
+| `SessionContext` 首版真实接线 | 已完成 | follow-up 已可真实续接 |
+| `event_impact_analysis` 首版四阶段接线 | 已完成 | 事件链可真实执行 |
+| 双层外部上下文检索接入 | 已完成首版 | 已接入 Bocha（替换原 GDELT）+ 官方披露搜索；新增 `EventSearchProvider` Protocol 抽象边界 |
+| 事件分析评测样本与回放 | 已完成首版 | 可批量回放事件 query，并观测策略与降级结果 |
+| Streamlit 调试/评测工作台 | 已完成首版 | 已具备分析、调试、评测三视图骨架 |
+| 检索策略分类器训练 | 未开始实现 | 已单独拆成训练子项目，不阻塞主链 |
+| 事件分析评测集扩展 | 进行中 | 已有首版基线，后续继续补样本与误判场景 |
 
-## 8. 下一次阶段检查
+## 当前风险
 
-1. 检查是否选定并接入第一个真实外部检索 provider
-2. 检查事件分析评测样本是否开始沉淀
-3. 检查 `analyze_targets` 的结构化输入是否需要补充更多事实底座
+1. `RetrievalStrategyClassifier` 仍是 stub/fallback，真实小模型分类尚未接入主流程。
+2. 双层外部检索虽然已建立 replay 基线，但样本规模和弱结果覆盖仍不足。
+3. `analyze_targets` 已可批量回放，但目标发现质量仍需更多真实事件样本观察。
+4. 事件搜索单点依赖博查：未做重试 / 缓存 / 熔断；key 缺失或 429 限流时降级到披露源 + 本地 RAG，事件背景可能偏薄；详见 [operations/workbench-runbook.md §5.2](../operations/workbench-runbook.md)。
 
-## 9. 完成定义
+## 下一步建议
 
-控制面下一阶段可视为“进一步完成”的条件：
-
-- 外部工具检索已具备真实线上 provider
-- `event_impact_analysis` 建立起首批评测与回归集
-- 事件分析链路在更多 query 上具备稳定降级与可解释行为
+1. 扩展 `event_impact_analysis` 评测样本与误判回放集
+2. 按独立计划推进分类器训练与离线评测
+3. 评估是否需要缓存、超时控制与 provider 级别熔断

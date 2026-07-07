@@ -238,6 +238,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
                 "summary_hint": "红海局势升级导致绕航预期升温",
                 "supporting_points": ["航线扰动加剧", "运价弹性上升"],
                 "evidence_refs": ["ext_001"],
+                "source_status": {"local_rag_needed": True},
             }
         )
 
@@ -263,9 +264,52 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(event_context["event"], "红海局势升级")
         self.assertEqual(event_context["themes"], ["航运", "油运"])
         self.assertIn("红海局势升级导致绕航预期升温", event_context["context_summary"])
+        self.assertEqual(result.output_payload["strategy"], "")
         self.assertEqual(result.evidence_refs, ["ext_001", "evd_001"])
         self.assertEqual(len(external_retriever.event_calls), 1)
         self.assertEqual(len(facade.calls), 1)
+
+    def test_collect_event_context_stage_skips_local_rag_when_external_context_is_sufficient(self) -> None:
+        from finsight_agent.control_plane.orchestrator.stage_runners.collect_event_context import (
+            run_collect_event_context_stage,
+        )
+
+        facade = _StubRetrievalFacade(_build_retrieval_result())
+        external_retriever = _StubExternalContextRetriever(
+            event_context_payload={
+                "summary_hint": "红海局势升级已经形成清晰事件背景。",
+                "supporting_points": ["航线绕行预期上升", "运价弹性仍在持续发酵"],
+                "evidence_refs": ["bocha:001", "cninfo:001"],
+                "source_status": {
+                    "mode": "dual_primary",
+                    "allow_local_rag": False,
+                },
+            }
+        )
+
+        result = run_collect_event_context_stage(
+            request=_build_request(query="红海局势升级利好哪些 A 股航运公司？"),
+            router_result=_build_router_result(
+                intent="event_impact_analysis",
+                entities={
+                    "event": "红海局势升级",
+                    "themes": ["航运", "油运"],
+                    "time_scope": "recent",
+                },
+            ),
+            stage_constraints={"retrieval_budget": 3},
+            execution_state={},
+            retrieval_facade=facade,
+            external_context_retriever=external_retriever,
+        )
+
+        self.assertEqual(result.stage_name, "collect_event_context")
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.evidence_refs, ["bocha:001", "cninfo:001"])
+        self.assertEqual(result.output_payload["source_status"]["local_evidence_count"], 0)
+        self.assertEqual(result.output_payload["strategy"], "dual_primary")
+        self.assertEqual(len(external_retriever.event_calls), 1)
+        self.assertEqual(facade.calls, [])
 
     def test_analyze_targets_stage_returns_degraded_when_candidate_discovery_is_still_empty(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.analyze_targets import (

@@ -23,3 +23,10 @@ app:
     primary_parser_name: mineru
     parent_target_chars: 2000
     child_target_chars: 500
+  workbench:
+    mode: runnable
+    backend_host: 127.0.0.1
+    backend_port: 8000
+    backend_base_url: http://127.0.0.1:8000
+    frontend_host: 127.0.0.1
+    frontend_port: 8501

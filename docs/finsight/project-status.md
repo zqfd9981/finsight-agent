@@ -1,89 +1,111 @@
 # FinSight V1 项目状态
 
-日期：2026-07-02  
-状态：控制面已接通 `event_impact_analysis` 首版四阶段真实执行链，项目进入“能力增强与覆盖扩展”阶段。
+日期：2026-07-07
+状态：控制面、结构化数据、证据检索与事件主链均已形成首版可运行闭环，项目进入“能力增强、评测补强与稳定性优化”阶段。
 
-## 1. 总览
+## 总览
 
-当前项目已经完成以下首版闭环：
+当前已经完成这些关键闭环：
 
-- 共享 contracts、统一 API boundary、trace/envelope 已稳定落地
+- shared contracts、统一 API boundary、trace/envelope 已稳定落地
 - `semantic-routing-and-planning` 已稳定输出 `RouterResult` 与 `Plan`
 - retrieval facade 已稳定返回结构化 `RetrievalResult`
-- `structured-market-data-support` 已完成本地指标库与外部 fallback 首版闭环
-- orchestrator 已接通三条主路径：
+- `structured-market-data-support` 已完成“本地指标库 + 外部 fallback”首版闭环
+- orchestrator 已接通三条真实执行链：
   - `metric_lookup`
   - `evidence_lookup`
   - `event_impact_analysis`
+- `event_impact_analysis` 已接入首版真实双层外部检索：
+  - `Bocha` 事件搜索
+  - `CNInfo + SSE` 官方披露搜索
+- `event_impact_analysis` 已新增首版评测样本与 replay 回放框架
+- Streamlit 内部工作台已具备首版三视图骨架：
+  - `分析视图`
+  - `调试视图`
+  - `评测视图`
 
-## 2. 模块群状态
-
-| 模块群 | 当前状态 | 当前里程碑 | 说明 |
-| --- | --- | --- | --- |
-| 控制面 | 进行中 | M6 Event Chain Ready | `event_impact_analysis` 四阶段首版真实接线已完成，后续重点转向能力增强与评测 |
-| 数据与证据面 | 可联调 | M5 Data + Evidence Ready | retrieval 与 structured data 已可被统一控制面消费 |
-| 呈现与评测面 | 进行中 | M4 Response Ready | response/trace 已稳定，评测集与工作台体验仍待增强 |
-
-## 3. 关键 Spec 状态
-
-| Spec | 当前状态 | 说明 |
-| --- | --- | --- |
-| `project-implementation-architecture` | 完成 | 工程结构与分层边界稳定 |
-| `shared-analysis-contracts` | 完成 | `shared/contracts` 已稳定 |
-| `workbench-backend-api-boundary` | 完成 | 统一 request / response boundary 已稳定 |
-| `semantic-routing-and-planning` | 完成首版 | router / planner 已可稳定支撑真实执行链 |
-| `conversation-session-state` | 完成首版 | `SessionContext` 与 rolling summary 已接入统一入口 |
-| `event-analysis-orchestration` | 完成首版 | `metric_lookup` / `evidence_lookup` / `event_impact_analysis` 已接通真实执行链 |
-| `structured-market-data-support` | 完成首版 | 本地财报表格指标库、本地优先查询与外部 fallback 已落地 |
-| `evidence-retrieval-pipeline` | 完成首版 | retrieval 主链与结构化输出已稳定可消费 |
-| `report-trace-and-evaluation` | 进行中 | response / trace 已接线，评测体系待补强 |
-| `analysis-workbench` | 进行中 | API 主链已就绪，前端体验仍待增强 |
-
-## 4. 当前里程碑
+## 里程碑
 
 | 里程碑 | 状态 | 说明 |
 | --- | --- | --- |
-| M1 Contract Ready | 完成 | shared contracts 与 API boundary 已稳定 |
-| M2 Semantic Routing Ready | 完成 | routing / planning 已可稳定输出 |
-| M3 Retrieval Pipeline Ready | 完成 | retrieval 本地闭环已打通 |
+| M1 Contract Ready | 完成 | contracts 与 API boundary 已稳定 |
+| M2 Semantic Routing Ready | 完成 | routing / planning 已能稳定驱动真实链路 |
+| M3 Retrieval Pipeline Ready | 完成 | 本地 retrieval 闭环已稳定 |
 | M4 Response Ready | 完成 | response / trace / envelope 已稳定 |
-| M5 Structured Data Ready | 完成 | `metric_lookup` 已不再依赖 TODO 占位 |
-| M6 Event Chain Ready | 完成 | `event_impact_analysis` 四阶段首版执行链已接通 |
+| M5 Structured Data Ready | 完成 | `metric_lookup` 已不再依赖占位结果 |
+| M6 Event Chain Ready | 完成 | `event_impact_analysis` 四阶段主链已接通 |
+| M7 External Context Ready | 完成首版 | 双层外部检索已接入事件链 |
+| M8 Event Eval Ready | 完成首版 | 事件样本、回放与最小检查闭环已落地 |
+| M9 Workbench Runnable | 完成首版 | 后端 FastAPI 入口 + Streamlit 工作台已可一键启动；见 [operations/workbench-runbook.md](operations/workbench-runbook.md) |
+| M10 Event Search Replace | 完成首版 | 事件搜索 provider 由 GDELT 整体替换为博查（Bocha）Web Search API；新增 `EventSearchProvider` Protocol 抽象边界；新增护栏测试防 GDELT 回潮；见 [specs/2026-07-06-bocha-event-search-replace-gdelt-design.md](../superpowers/specs/2026-07-06-bocha-event-search-replace-gdelt-design.md) |
 
-## 5. 本轮新增成果
+## 本轮新增成果
 
-- 新增 `collect_event_context` 与 `analyze_targets` 两个真实 stage runner
-- 新增外部上下文检索抽象与受约束 LLM 目标分析服务
-- orchestrator 已可调度 `event_impact_analysis` 四阶段完整链路
-- `synthesize_report` 已消费事件目标分析结果，并在摘要/不确定性/下一步建议中体现
-- 新增 `event_impact_analysis` 端到端集成测试
+- 新增 `RetrievalStrategyClassifier` 抽象与 stub/fallback
+- 新增 `ContextRetrievalPlanner`
+- 新增双层外部检索组合器 `DualSourceExternalContextRetriever`
+- 新增真实 provider：
+  - `BochaEventSearchProvider`
+  - `CninfoContextSearchProvider`
+  - `SseContextSearchProvider`
+  - `OfficialDisclosureSearchProvider`
+- 事件搜索 provider 由 GDELT 整体替换为博查（Bocha）Web Search API：
+  - 新增 `EventSearchProvider` Protocol 抽象边界（与现有 `ExternalContextRetriever` Protocol 同侧）
+  - `OrchestratorService` 默认装配改用 Bocha；缺失 `BOCHA_API_KEY` 时构造期抛 `RuntimeError`
+  - 删除 GDELT 源码、单测、根目录 2 个 ad-hoc 脚本
+  - 新增护栏测试 `test_no_gdelt_references_in_production.py` 防止 GDELT 回潮
+  - 新增根目录 `test_bocha.py` 冒烟脚本（不进 CI）
+- `collect_event_context` 从“固定外部 + 固定本地 RAG”改为“条件 RAG”
+- `OrchestratorService` 默认装配真实 dual-source external retriever
+- 新增 `event_eval` 模块：
+  - fixture schema
+  - replay result schema
+  - replay runner
+  - 确定性 checks
+- 新增 Streamlit 工作台最小可视化骨架：
+  - `分析视图` 复用统一 `analysis/turns` 入口
+  - `调试视图` 可查看 route / plan / execution
+  - `评测视图` 可查看 replay summary、records 与 checks
+- 当前可批量观察：
+  - `intent`
+  - 检索策略
+  - 是否降级
+  - 候选数量
+  - 证据引用数量
 
-## 6. 当前阻塞项
+## 当前重点风险
 
-### Blocker 1：外部工具检索仍为抽象层
+### 1. 检索策略分类器仍为 stub/fallback
 
-影响范围：
+影响：
+- `collect_event_context` 的主检索起手式目前仍使用安全默认值
+- 真实分类器训练与离线评测尚未接入主流程
 
-- `collect_event_context` 与候选发现检索目前已具备接入点，但默认仍依赖 stub / 空实现
-- 近期事件的时效性覆盖能力仍受外部 provider 接入情况限制
+状态：
+- 训练设计与计划已单独拆出
+- 不阻塞当前事件主链继续演进
 
-解除条件：
+### 2. 真实外部检索已接入，首版评测基线已建立
 
-- 选定并接入首个真实外部搜索 / 新闻 / 公告 provider
+影响：
+- `Bocha` 与官方披露站检索已能被控制面消费
+- 且现在已经可以用 replay 样本批量验证命中质量、弱结果降级与不同事件类型的稳定性
 
-### Blocker 2：事件分析评测集仍待建立
+### 3. 事件评测仍处于首版基线阶段
 
-影响范围：
+影响：
+- 当前已具备首批事件样本、回放入口与最小检查项
+- 但样本量、弱结果覆盖、误判门槛和长期趋势分析仍需继续扩展
 
-- `event_impact_analysis` 的候选发现、目标排序与降级语义仍缺系统化回归样本
+### 4. 事件搜索单点依赖博查（Bocha）
 
-解除条件：
+影响：
+- `event_impact_analysis` 的外部事件背景完全依赖博查 Web Search API；key 缺失 / 配额耗尽 / 429 限流时降级到披露源 + 本地 RAG，但仍可能出现事件背景薄弱
+- 当前未做重试 / 缓存 / 熔断；首次查询期失败语义清晰，但长期稳定性需要更多真实流量验证
 
-- 补齐首批事件分析 query 集、候选标的集与人工验收口径
+## 下一阶段建议
 
-## 7. 下一阶段建议
-
-1. 为 `collect_event_context` 与候选发现检索接入真实外部工具 provider
-2. 建立 `event_impact_analysis` 的首批评测样本与回归集
-3. 继续扩展 `structured-market-data-support` 的指标、期间与公司覆盖范围
-4. 评估是否为 `analyze_targets` 增加更细的结构化事实输入与 LLM 输出校验
+1. 扩展 `event_impact_analysis` 评测样本规模，补更多弱结果与误判场景
+2. 独立推进 `RetrievalStrategyClassifier` 训练子项目
+3. 为外部检索补缓存、超时与失败降级策略
+4. 扩展结构化数据覆盖范围，补更多公司、指标与期间

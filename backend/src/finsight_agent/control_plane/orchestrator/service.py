@@ -14,13 +14,17 @@ from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
 
-from .context_retriever import (
-    ExternalContextRetriever,
-    NullExternalContextRetriever,
+from finsight_agent.infra.external.bocha_event_search import BochaEventSearchProvider
+from finsight_agent.infra.external.official_disclosure_search import (
+    OfficialDisclosureSearchProvider,
 )
+from .context_retriever import ExternalContextRetriever
+from .context_retrieval_planner import ContextRetrievalPlanner
+from .dual_source_context_retriever import DualSourceExternalContextRetriever
 from .models import OrchestrationResult
 from .observation_builder import build_stage_observation
 from .policies import build_guardrail_response, should_short_circuit
+from .retrieval_strategy_classifier import StubRetrievalStrategyClassifier
 from .stage_runners import STAGE_RUNNERS
 from .target_analysis import TargetAnalysisService
 from .trace_builder import build_execution_trace_block
@@ -43,9 +47,7 @@ class OrchestratorService:
         self._reporting_service = reporting_service or ReportingService()
         self._retrieval_facade = retrieval_facade
         self._retrieval_facade_factory = retrieval_facade_factory or build_retrieval_facade
-        self._external_context_retriever = (
-            external_context_retriever or NullExternalContextRetriever()
-        )
+        self._external_context_retriever = external_context_retriever or _build_default_external_context_retriever()
         self._target_analysis_service = target_analysis_service or TargetAnalysisService()
 
     def execute(
@@ -148,3 +150,14 @@ class OrchestratorService:
             return self._retrieval_facade, False
         retrieval_facade = self._retrieval_facade_factory()
         return retrieval_facade, True
+
+
+def _build_default_external_context_retriever() -> DualSourceExternalContextRetriever:
+    """默认装配免费的双源外部上下文检索链路。"""
+
+    return DualSourceExternalContextRetriever(
+        classifier=StubRetrievalStrategyClassifier(),
+        planner=ContextRetrievalPlanner(),
+        event_search_provider=BochaEventSearchProvider(),
+        disclosure_search_provider=OfficialDisclosureSearchProvider(),
+    )

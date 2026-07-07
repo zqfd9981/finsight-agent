@@ -236,6 +236,14 @@ class OrchestratorModelsTest(unittest.TestCase):
 
 
 class OrchestratorServiceExecutionTest(unittest.TestCase):
+    def test_service_builds_dual_source_external_context_retriever_by_default(self) -> None:
+        service = OrchestratorService()
+
+        self.assertEqual(
+            service._external_context_retriever.__class__.__name__,
+            "DualSourceExternalContextRetriever",
+        )
+
     def setUp(self) -> None:
         self.service = OrchestratorService(
             structured_data_service=StubStructuredDataService(),
@@ -383,6 +391,17 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
         )
         self.assertIn("中远海能", result.final_response.summary)
         self.assertEqual(result.trace_blocks[-1].block_type, "execution")
+        execution_payload = result.trace_blocks[-1].payload_summary
+        self.assertEqual(
+            execution_payload["stage_statuses"]["collect_event_context"],
+            "success",
+        )
+        collect_stage = next(
+            item
+            for item in execution_payload["stage_observations"]
+            if item["stage_name"] == "collect_event_context"
+        )
+        self.assertIn("key_outputs", collect_stage)
 
     def test_execute_metric_lookup_plan_does_not_build_retrieval_facade(self) -> None:
         retrieval_factory_calls: list[str] = []
