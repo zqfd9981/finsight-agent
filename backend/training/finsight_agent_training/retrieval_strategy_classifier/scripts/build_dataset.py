@@ -72,6 +72,6 @@ if __name__ == "__main__":
     # [3]=training, [4]=backend, [5]=repo_root
     repo_root = Path(__file__).resolve().parents[5]
     labeled = repo_root / "backend" / "training" / "finsight_agent_training" / "retrieval_strategy_classifier" / "data" / "labeled" / "labeled.jsonl"
-    out_dir = labeled.parent / "splits"
+    out_dir = labeled.parent.parent / "splits"
     counts = build_splits(labeled_path=labeled, splits_dir=out_dir)
     print(f"splits written: {counts}")

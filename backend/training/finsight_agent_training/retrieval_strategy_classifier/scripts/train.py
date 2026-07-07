@@ -158,6 +158,7 @@ def train(
     weight_decay: float = DEFAULT_WEIGHT_DECAY,
     seed: int = DEFAULT_SEED,
     max_length: int = DEFAULT_MAX_LENGTH,
+    use_class_weights: bool = True,
 ) -> TrainingArtifacts:
     """离线微调 StructBERT 三分类，产出 ``artifacts_dir``。"""
     try:
@@ -212,6 +213,21 @@ def train(
     train_loader = DataLoader(_TrainDataset(), batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(_ValDataset(), batch_size=batch_size)
 
+    # class weights：按训练集逆频率加权，缓解 dual_primary 偏多的问题
+    class_weights: torch.Tensor | None = None
+    if use_class_weights:
+        label_counts: dict[int, int] = {0: 0, 1: 0, 2: 0}
+        for row in train_rows:
+            label_counts[LABEL_TO_INDEX[str(row["label"])]] += 1
+        total = sum(label_counts.values())
+        n_labels = len(LABEL_TO_INDEX)
+        weights = [
+            total / (n_labels * label_counts[i]) if label_counts[i] else 1.0
+            for i in range(n_labels)
+        ]
+        class_weights = torch.tensor(weights, dtype=torch.float32, device=device)
+        print(f"class weights: {dict(zip(LABEL_TO_INDEX.keys(), weights))}")
+
     optim = torch.optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
     )
@@ -232,15 +248,27 @@ def train(
         train_loss = 0.0
         for batch in train_loader:
             optim.zero_grad()
-            outputs = model(
-                input_ids=batch["input_ids"].to(device),
-                attention_mask=batch["attention_mask"].to(device),
-                labels=batch["labels"].to(device),
-            )
-            outputs.loss.backward()
+            # 手算 weighted CE（class weights 在 device 上）
+            if class_weights is not None:
+                logits = model(
+                    input_ids=batch["input_ids"].to(device),
+                    attention_mask=batch["attention_mask"].to(device),
+                ).logits
+                labels = batch["labels"].to(device)
+                loss = torch.nn.functional.cross_entropy(
+                    logits, labels, weight=class_weights
+                )
+            else:
+                outputs = model(
+                    input_ids=batch["input_ids"].to(device),
+                    attention_mask=batch["attention_mask"].to(device),
+                    labels=batch["labels"].to(device),
+                )
+                loss = outputs.loss
+            loss.backward()
             optim.step()
             scheduler.step()
-            train_loss += float(outputs.loss.detach())
+            train_loss += float(loss.detach())
 
         correct, total = _evaluate(model, val_loader, device)
         val_acc = correct / total if total else 0.0
