@@ -65,3 +65,43 @@ class BuildInputTextTest(unittest.TestCase):
         self.assertEqual(LABEL_TO_INDEX, expected)
         for label, idx in expected.items():
             self.assertEqual(INDEX_TO_LABEL[idx], label)
+
+
+class LabeledDatasetSchemaTest(unittest.TestCase):
+    def test_labeled_jsonl_has_required_fields_per_row(self) -> None:
+        import json
+
+        path = (
+            REPO_ROOT
+            / "backend"
+            / "training"
+            / "finsight_agent_training"
+            / "retrieval_strategy_classifier"
+            / "data"
+            / "labeled"
+            / "labeled.jsonl"
+        )
+        self.assertTrue(path.exists(), f"missing labeled dataset at {path}")
+
+        required = {
+            "sample_id", "query", "intent", "event", "themes",
+            "target", "time_scope", "session_topic", "label",
+            "label_source",
+        }
+        valid_labels = {"event_primary", "disclosure_primary", "dual_primary"}
+        valid_sources = {"human_authored", "human_reviewed", "transferred_from_event_eval"}
+
+        count = 0
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                missing = required - set(row.keys())
+                self.assertFalse(missing, f"row missing fields: {missing} -> {row}")
+                self.assertIn(row["label"], valid_labels)
+                self.assertIn(row["label_source"], valid_sources)
+                count += 1
+
+        self.assertGreaterEqual(count, 300, f"need >= 300 labeled samples, got {count}")
