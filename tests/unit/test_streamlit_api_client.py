@@ -13,6 +13,7 @@ for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
         sys.path.insert(0, str(candidate))
 
 from frontend.streamlit_app.api_client import WorkbenchApiClient
+from shared.contracts.analysis_stream_event import AnalysisStreamEvent
 
 
 class StreamlitApiClientTest(unittest.TestCase):
@@ -103,6 +104,42 @@ class StreamlitApiClientTest(unittest.TestCase):
         self.assertEqual(replay.summary.total, 1)
         self.assertEqual(replay.records[0].result.actual_strategy, "dual_primary")
 
+    def test_parse_stream_event_restores_event_payload(self) -> None:
+        client = WorkbenchApiClient()
+
+        event = client.parse_stream_event(
+            {
+                "event_type": "run_finished",
+                "run_id": "run_001",
+                "stage_name": "",
+                "status": "success",
+                "message": "Final response ready",
+                "started_at": "2026-07-08T00:00:00Z",
+                "finished_at": "2026-07-08T00:00:01Z",
+                "duration_ms": 1000,
+                "payload": {
+                    "response_envelope": {
+                        "version": "v1",
+                        "session_id": "sess_x",
+                        "turn_id": "turn_stub",
+                        "response": {
+                            "response_type": "success",
+                            "session_id": "sess_x",
+                            "summary": "ok",
+                            "answer_markdown": "这是完整回答。",
+                            "report_blocks": [],
+                        },
+                        "trace_blocks": [],
+                    }
+                },
+                "final_response": {"response_type": "success", "summary": "ok"},
+            }
+        )
+
+        self.assertIsInstance(event, AnalysisStreamEvent)
+        self.assertEqual(event.event_type, "run_finished")
+        self.assertEqual(event.payload["response_envelope"]["session_id"], "sess_x")
+
 
 class WorkbenchApiClientHttpTest(unittest.TestCase):
     def test_send_request_posts_to_resolved_backend_base_url(self) -> None:
@@ -191,6 +228,38 @@ class WorkbenchApiClientHttpTest(unittest.TestCase):
         )
         self.assertIsInstance(view, EventReplayRunView)
         self.assertEqual(view.summary.total, 0)
+
+    def test_stream_request_yields_sse_events(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        fake_response = MagicMock()
+        fake_response.ok = True
+        fake_response.status_code = 200
+        fake_response.headers = {"content-type": "text/event-stream"}
+        fake_response.iter_lines.return_value = iter(
+            [
+                'event: run_started',
+                'data: {"event_type":"run_started","run_id":"run_001","stage_name":"","status":"running","message":"Analysis started","started_at":"2026-07-08T00:00:00Z","finished_at":null,"duration_ms":null,"payload":{},"final_response":null}',
+                "",
+                'event: run_finished',
+                'data: {"event_type":"run_finished","run_id":"run_001","stage_name":"","status":"success","message":"Final response ready","started_at":"2026-07-08T00:00:00Z","finished_at":"2026-07-08T00:00:01Z","duration_ms":1000,"payload":{"response_envelope":{"version":"v1","session_id":"sess_x","turn_id":"turn_stub","response":{"response_type":"success","session_id":"sess_x","summary":"ok","answer_markdown":"这是完整回答。","report_blocks":[]},"trace_blocks":[]}},"final_response":{"response_type":"success","summary":"ok"}}',
+                "",
+            ]
+        )
+
+        context_manager = MagicMock()
+        context_manager.__enter__.return_value = fake_response
+        context_manager.__exit__.return_value = None
+
+        client = WorkbenchApiClient(backend_base_url="http://h:1")
+
+        with patch(
+            "frontend.streamlit_app.api_client.requests.post",
+            return_value=context_manager,
+        ):
+            events = list(client.stream_request(query="hi"))
+
+        self.assertEqual([item.event_type for item in events], ["run_started", "run_finished"])
 
 
 if __name__ == "__main__":

@@ -126,6 +126,24 @@ class _StubPlanner:
         )
 
 
+class _StubReranker:
+    def rerank(self, *, query, profile, candidates, top_n=None):
+        del query, profile, top_n
+        ranked = []
+        for candidate in candidates:
+            text = f"{candidate.title} {candidate.text}"
+            score = 0.95 if "钢铁" in text else 0.05
+            ranked.append(
+                {
+                    "id": candidate.id,
+                    "score": score,
+                    "keep": score >= 0.1,
+                    "reason": "topic_match" if score >= 0.1 else "topic_mismatch",
+                }
+            )
+        return ranked
+
+
 class DualSourceExternalContextRetrieverTest(unittest.TestCase):
     def test_event_primary_retrieve_event_context_uses_event_source_only(self) -> None:
         from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
@@ -283,6 +301,61 @@ class DualSourceExternalContextRetrieverTest(unittest.TestCase):
 
         self.assertEqual(result["candidates"], ["COSCO", "China Merchants"])
         self.assertEqual(result["evidence_refs"], ["cninfo:2"])
+
+    def test_retrieve_event_context_reranks_items_and_keeps_topic_consistent_candidates(self) -> None:
+        from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
+            ExternalContextItem,
+            ExternalContextResult,
+        )
+        from finsight_agent.control_plane.orchestrator.dual_source_context_retriever import (
+            DualSourceExternalContextRetriever,
+        )
+
+        retriever = DualSourceExternalContextRetriever(
+            planner=_StubPlanner(),
+            event_search_provider=_StubEventProvider(
+                ExternalContextResult(
+                    items=[
+                        ExternalContextItem(
+                            title="生猪产能去化进入倒计时",
+                            source="bocha",
+                            publish_date="2026-07-08",
+                            url="https://example.com/pig",
+                            snippet="行业冲刺跑提速。",
+                            themes=["capacity"],
+                            evidence_ref="bocha:pig",
+                        ),
+                        ExternalContextItem(
+                            title="钢铁行业新一轮产能去化观察",
+                            source="bocha",
+                            publish_date="2026-07-08",
+                            url="https://example.com/steel",
+                            snippet="聚焦行政约束与市场化出清。",
+                            themes=["steel"],
+                            evidence_ref="bocha:steel",
+                        ),
+                    ],
+                    summary_hint="生猪产能去化进入倒计时",
+                    evidence_refs=["bocha:pig", "bocha:steel"],
+                )
+            ),
+            disclosure_search_provider=_StubDisclosureProvider(ExternalContextResult()),
+            reranker=_StubReranker(),
+        )
+
+        result = retriever.retrieve_event_context(
+            query="钢铁新一轮产能去化到底是行政命令还是市场化倒逼？",
+            event="钢铁产能去化",
+            themes=["钢铁"],
+            time_scope="recent",
+            limit=3,
+            strategy="event_primary",
+        )
+
+        self.assertEqual(result["summary_hint"], "钢铁行业新一轮产能去化观察")
+        self.assertEqual(result["evidence_refs"], ["bocha:steel"])
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["title"], "钢铁行业新一轮产能去化观察")
 
 
 if __name__ == "__main__":

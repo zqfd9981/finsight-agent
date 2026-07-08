@@ -21,6 +21,7 @@ from finsight_agent.control_plane.orchestrator.observation_builder import (
 )
 from finsight_agent.control_plane.orchestrator.service import OrchestratorService
 from shared.contracts.analysis_request import AnalysisRequest
+from shared.contracts.analysis_stream_event import AnalysisStreamEvent
 from shared.contracts.final_response import FinalResponse
 from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
@@ -409,6 +410,75 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
         self.assertEqual(
             self.external_context_retriever.context_calls[0]["strategy"],
             "dual_primary",
+        )
+
+    def test_execute_emits_stage_started_and_finished_events(self) -> None:
+        router_result = RouterResult(
+            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={
+                "event": "红海局势升级",
+                "themes": ["航运"],
+                "time_scope": "recent",
+            },
+            needs=["news_search"],
+            constraints={"preferred_output": "report"},
+        )
+        plan = Plan(
+            plan_id="plan_event_streaming_v1",
+            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
+            stages=[
+                StageName.COLLECT_EVENT_CONTEXT.value,
+                StageName.ANALYZE_TARGETS.value,
+                StageName.RETRIEVE_EVIDENCE.value,
+                StageName.SYNTHESIZE_REPORT.value,
+            ],
+            stage_constraints={
+                StageName.COLLECT_EVENT_CONTEXT.value: {
+                    "retrieval_budget": 3,
+                    "strategy": "dual_primary",
+                },
+                StageName.ANALYZE_TARGETS.value: {"candidate_discovery_budget": 1},
+                StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 4},
+                StageName.SYNTHESIZE_REPORT.value: {"preferred_output": "report"},
+            },
+            response_mode=ResponseMode.REPORT.value,
+        )
+        captured: list[AnalysisStreamEvent] = []
+
+        self.service.execute(
+            request=AnalysisRequest(
+                query="红海局势升级利好哪些A股航运股？",
+                session_id="sess_001",
+                include_trace=True,
+            ),
+            router_result=router_result,
+            plan=plan,
+            session_context=None,
+            event_callback=captured.append,
+        )
+
+        stage_events = [
+            (item.event_type, item.stage_name, item.status)
+            for item in captured
+            if item.event_type.startswith("stage_")
+        ]
+        self.assertEqual(
+            stage_events,
+            [
+                ("stage_started", "collect_event_context", "running"),
+                ("stage_finished", "collect_event_context", "success"),
+                ("stage_started", "analyze_targets", "running"),
+                ("stage_finished", "analyze_targets", "success"),
+                ("stage_started", "retrieve_evidence", "running"),
+                ("stage_finished", "retrieve_evidence", "success"),
+                ("stage_started", "synthesize_report", "running"),
+                ("stage_finished", "synthesize_report", "success"),
+            ],
+        )
+        self.assertTrue(
+            all(item.duration_ms is not None for item in captured if item.event_type == "stage_finished")
         )
 
 

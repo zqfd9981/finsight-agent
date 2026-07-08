@@ -88,12 +88,13 @@ def run_collect_event_context_stage(
     source_status = dict(external_payload.get("source_status") or {})
     source_status.update(
         {
-            "external_used": bool(external_payload),
+            "external_used": bool(source_status) or bool(external_payload.get("items")),
             "local_evidence_count": len(local_evidence_refs),
         }
     )
     source_status.setdefault("mode", strategy)
     candidate_hints = _normalize_parts(external_payload.get("candidate_hints"))
+    selected_items = external_payload.get("items") or []
 
     event_context = {
         "event": event,
@@ -103,6 +104,7 @@ def run_collect_event_context_stage(
         "supporting_points": supporting_points,
         "evidence_refs": evidence_refs,
         "candidate_hints": candidate_hints,
+        "items": selected_items,
     }
     event_entities = {
         "event": event,

@@ -10,6 +10,7 @@ class ExternalContextItem:
     publish_date: str
     url: str
     snippet: str
+    evidence_ref: str = ""
     company_names: list[str] = field(default_factory=list)
     company_codes: list[str] = field(default_factory=list)
     themes: list[str] = field(default_factory=list)
