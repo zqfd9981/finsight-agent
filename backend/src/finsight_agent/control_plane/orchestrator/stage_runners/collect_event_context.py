@@ -30,14 +30,15 @@ def run_collect_event_context_stage(
     event = str(entities.get("event") or "").strip()
     themes = _normalize_parts(entities.get("themes"))
     time_scope = str(entities.get("time_scope") or "recent").strip()
+    strategy = str(constraints.get("strategy") or "").strip()
 
-    # 先取事件外部上下文；只有外部结果不足或显式要求时，才补一次本地 RAG。
     external_payload = external_context_retriever.retrieve_event_context(
         query=request.query,
         event=event,
         themes=themes,
         time_scope=time_scope,
         limit=retrieval_budget,
+        strategy=strategy,
     ) or {}
 
     retrieval_result = None
@@ -80,7 +81,7 @@ def run_collect_event_context_stage(
             *supporting_points[:2],
         ]
     )
-    context_summary = "；".join(part for part in summary_parts if part)
+    context_summary = " ".join(part for part in summary_parts if part)
     status = "success" if context_summary or evidence_refs else "degraded"
     degraded_reason = None if status == "success" else "event_context_insufficient"
 
@@ -91,7 +92,7 @@ def run_collect_event_context_stage(
             "local_evidence_count": len(local_evidence_refs),
         }
     )
-    strategy = str(source_status.get("mode") or "").strip()
+    source_status.setdefault("mode", strategy)
     candidate_hints = _normalize_parts(external_payload.get("candidate_hints"))
 
     event_context = {
@@ -120,13 +121,11 @@ def run_collect_event_context_stage(
         },
         evidence_refs=evidence_refs,
         degraded_reason=degraded_reason,
-        user_summary=context_summary or "已拿到有限事件背景，后续分析将按降级路径继续。",
+        user_summary=context_summary or "Collected limited event context; downstream stages may degrade.",
     )
 
 
 def _should_use_local_rag(external_payload: dict[str, object]) -> bool:
-    """仅在外部上下文不足或显式要求时，才补一次本地 RAG。"""
-
     if not external_payload:
         return True
 

@@ -1,10 +1,9 @@
-"""DualSourceExternalContextRetriever trace 透传测试。"""
-
 from __future__ import annotations
 
 import sys
 import unittest
 from pathlib import Path
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_SRC_ROOT = REPO_ROOT / "backend" / "src"
@@ -39,106 +38,73 @@ class _StubDisclosureProvider:
         return self._result
 
 
-class _StubClassifier:
-    def __init__(self, payload):
-        self._payload = payload
+class _StubPlanner:
+    def build_plan(self, *, strategy_payload, router_payload):
+        del router_payload
+        mode = strategy_payload.get("strategy", "event_primary")
+        if mode == "dual_primary":
+            steps = [
+                {"source": "event_search", "budget": 1},
+                {"source": "disclosure_search", "budget": 1},
+            ]
+        elif mode == "disclosure_primary":
+            steps = [{"source": "disclosure_search", "budget": 1}]
+        else:
+            steps = [{"source": "event_search", "budget": 1}]
 
-    def classify(self, *, query, router_payload, session_topic):
-        del query, router_payload, session_topic
-        return self._payload
+        return type(
+            "Plan",
+            (),
+            {"mode": mode, "steps": steps, "allow_local_rag": False},
+        )()
 
 
 class DualSourceStrategyTraceTest(unittest.TestCase):
-    def _build_planner(self):
-        def build_plan(*, strategy_payload, router_payload):
-            del router_payload
-            mode = strategy_payload.get("strategy", "event_primary")
-            if mode == "dual_primary":
-                steps = [
-                    {"source": "event_search", "budget": 1},
-                    {"source": "disclosure_search", "budget": 1},
-                ]
-            elif mode == "disclosure_primary":
-                steps = [{"source": "disclosure_search", "budget": 1}]
-            else:
-                steps = [{"source": "event_search", "budget": 1}]
-            return type(
-                "Plan",
-                (),
-                {"mode": mode, "steps": steps, "allow_local_rag": False},
-            )()
-
-        return type(
-            "_StubPlanner",
-            (),
-            {"build_plan": staticmethod(build_plan)},
-        )()
-
-    def test_source_status_includes_trained_metadata(self) -> None:
-        classifier = _StubClassifier(
-            {
-                "strategy": "dual_primary",
-                "confidence": "high",
-                "reason": "structbert:margin=0.500;top1=dual_primary;top2=event_primary",
-            }
-        )
-        planner = self._build_planner()
-        event_provider = _StubEventProvider(
-            ExternalContextResult(summary_hint="事件背景", evidence_refs=["bocha:1"])
-        )
-        disclosure_provider = _StubDisclosureProvider(
-            ExternalContextResult(
-                candidate_hints=["中远海能"], evidence_refs=["cninfo:1"]
-            )
-        )
-
+    def test_source_status_reflects_upstream_dual_primary_strategy(self) -> None:
         retriever = DualSourceExternalContextRetriever(
-            classifier=classifier,
-            planner=planner,
-            event_search_provider=event_provider,
-            disclosure_search_provider=disclosure_provider,
+            planner=_StubPlanner(),
+            event_search_provider=_StubEventProvider(
+                ExternalContextResult(summary_hint="Event background", evidence_refs=["bocha:1"])
+            ),
+            disclosure_search_provider=_StubDisclosureProvider(
+                ExternalContextResult(candidate_hints=["COSCO"], evidence_refs=["cninfo:1"])
+            ),
         )
 
         result = retriever.retrieve_event_context(
-            query="红海局势升级利好哪些A股航运股？",
-            event="红海局势升级",
-            themes=["航运"],
+            query="Who benefits from the Red Sea disruption?",
+            event="Red Sea disruption",
+            themes=["shipping"],
             time_scope="recent",
             limit=3,
+            strategy="dual_primary",
         )
         status = result["source_status"]
-        self.assertEqual(status["strategy_confidence"], "high")
-        self.assertIn("structbert:margin=0.5", status["strategy_reason"])
-        self.assertEqual(status["strategy_source"], "trained")
         self.assertEqual(status["mode"], "dual_primary")
+        self.assertEqual(status["allow_local_rag"], False)
 
-    def test_source_status_marks_stub_fallback(self) -> None:
-        """stub_fallback 路径下 strategy_source 必须是 ``stub_fallback``。"""
-        classifier = _StubClassifier(
-            {"strategy": "event_primary", "confidence": "low", "reason": "stub_fallback"}
-        )
-        planner = self._build_planner()
-        event_provider = _StubEventProvider(
-            ExternalContextResult(summary_hint="事件背景", evidence_refs=["bocha:1"])
-        )
-        disclosure_provider = _StubDisclosureProvider(
-            ExternalContextResult(evidence_refs=["cninfo:1"])
-        )
-
+    def test_source_status_reflects_upstream_event_primary_strategy(self) -> None:
         retriever = DualSourceExternalContextRetriever(
-            classifier=classifier,
-            planner=planner,
-            event_search_provider=event_provider,
-            disclosure_search_provider=disclosure_provider,
+            planner=_StubPlanner(),
+            event_search_provider=_StubEventProvider(
+                ExternalContextResult(summary_hint="Event background", evidence_refs=["bocha:1"])
+            ),
+            disclosure_search_provider=_StubDisclosureProvider(
+                ExternalContextResult(evidence_refs=["cninfo:1"])
+            ),
         )
         result = retriever.retrieve_event_context(
-            query="x",
-            event="e",
+            query="What happened in the Red Sea disruption?",
+            event="Red Sea disruption",
             themes=[],
             time_scope="recent",
             limit=1,
+            strategy="event_primary",
         )
         status = result["source_status"]
-        self.assertEqual(status["strategy_source"], "stub_fallback")
-        self.assertEqual(status["strategy_reason"], "stub_fallback")
-        self.assertEqual(status["strategy_confidence"], "low")
+        self.assertEqual(status["mode"], "event_primary")
+        self.assertEqual(status["allow_local_rag"], False)
+
+
+if __name__ == "__main__":
+    unittest.main()

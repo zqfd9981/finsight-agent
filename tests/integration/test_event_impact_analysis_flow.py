@@ -29,6 +29,7 @@ from shared.contracts.router_result import RouterResult
 from shared.enums.follow_up_type import FollowUpType
 from shared.enums.intent import Intent
 from shared.enums.response_mode import ResponseMode
+from shared.enums.stage_name import StageName
 
 
 class _StubRouterService:
@@ -39,8 +40,8 @@ class _StubRouterService:
             follow_up_type=FollowUpType.NONE.value,
             confidence="high",
             entities={
-                "event": "红海局势升级",
-                "themes": ["航运"],
+                "event": "Red Sea disruption",
+                "themes": ["shipping"],
                 "time_scope": "recent",
             },
             needs=["news_search", "rag_retrieval"],
@@ -48,25 +49,83 @@ class _StubRouterService:
         )
 
 
+class _StubStrategyClassifier:
+    def __init__(self, strategy: str = "dual_primary") -> None:
+        self.strategy = strategy
+        self.calls: list[dict[str, object]] = []
+
+    def classify(self, *, query, router_payload, session_topic):
+        self.calls.append(
+            {
+                "query": query,
+                "router_payload": router_payload,
+                "session_topic": session_topic,
+            }
+        )
+        return {
+            "strategy": self.strategy,
+            "confidence": "high",
+            "reason": "test_classifier",
+        }
+
+
 class _StubPlannerService:
-    def build_plan(self, router_result: RouterResult) -> Plan:
-        del router_result
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def build_plan(
+        self,
+        router_result: RouterResult,
+        strategy_payload: dict[str, str] | None = None,
+    ) -> Plan:
+        self.calls.append(
+            {
+                "router_result": router_result,
+                "strategy_payload": strategy_payload,
+            }
+        )
+        strategy = (strategy_payload or {}).get("strategy", "event_primary")
+        if strategy == "dual_primary":
+            stages = [
+                StageName.COLLECT_EVENT_CONTEXT.value,
+                StageName.ANALYZE_TARGETS.value,
+                StageName.RETRIEVE_EVIDENCE.value,
+                StageName.SYNTHESIZE_REPORT.value,
+            ]
+            stage_constraints = {
+                StageName.COLLECT_EVENT_CONTEXT.value: {
+                    "retrieval_budget": 3,
+                    "strategy": "dual_primary",
+                },
+                StageName.ANALYZE_TARGETS.value: {"candidate_discovery_budget": 1},
+                StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 4},
+                StageName.SYNTHESIZE_REPORT.value: {"preferred_output": "report"},
+            }
+            response_mode = ResponseMode.REPORT.value
+            plan_id = "plan_event_impact_analysis_dual_primary_v1"
+        else:
+            stages = [
+                StageName.COLLECT_EVENT_CONTEXT.value,
+                StageName.SYNTHESIZE_EVENT_ANSWER.value,
+            ]
+            stage_constraints = {
+                StageName.COLLECT_EVENT_CONTEXT.value: {
+                    "retrieval_budget": 3,
+                    "strategy": strategy,
+                },
+                StageName.SYNTHESIZE_EVENT_ANSWER.value: {
+                    "preferred_output": "brief_answer"
+                },
+            }
+            response_mode = ResponseMode.BRIEF_ANSWER.value
+            plan_id = "plan_event_impact_analysis_event_primary_v1"
+
         return Plan(
-            plan_id="plan_event_impact_analysis_v1",
+            plan_id=plan_id,
             intent=Intent.EVENT_IMPACT_ANALYSIS.value,
-            stages=[
-                "collect_event_context",
-                "analyze_targets",
-                "retrieve_evidence",
-                "synthesize_report",
-            ],
-            stage_constraints={
-                "collect_event_context": {"retrieval_budget": 3},
-                "analyze_targets": {"candidate_discovery_budget": 1},
-                "retrieve_evidence": {"retrieval_budget": 4},
-                "synthesize_report": {"preferred_output": "report"},
-            },
-            response_mode=ResponseMode.REPORT.value,
+            stages=stages,
+            stage_constraints=stage_constraints,
+            response_mode=response_mode,
         )
 
 
@@ -94,8 +153,8 @@ class _StubRetrievalFacade:
                     support_strength="high",
                     matched_chunk_id="chunk_001",
                     matched_parent_id="parent_001",
-                    excerpt="红海局势升级后，绕航预期推升了航运运价弹性。",
-                    parent_context="行业跟踪材料指出航运链条可能受益于运价上行。",
+                    excerpt="Freight pricing improved after the disruption.",
+                    parent_context="Industry commentary linked route risk to rate elasticity.",
                     citation=CitationRecord(
                         document_id="doc_001",
                         page_start=3,
@@ -109,9 +168,9 @@ class _StubRetrievalFacade:
                         rerank_score=0.95,
                     ),
                     company_code="600026",
-                    company_name="中远海能",
+                    company_name="COSCO",
                     doc_type="industry_note",
-                    section_path=["事件影响分析"],
+                    section_path=["Event Impact"],
                 )
             ],
         )
@@ -121,6 +180,9 @@ class _StubRetrievalFacade:
 
 
 class _StubExternalContextRetriever:
+    def __init__(self) -> None:
+        self.event_calls: list[dict[str, object]] = []
+
     def retrieve_event_context(
         self,
         *,
@@ -129,12 +191,30 @@ class _StubExternalContextRetriever:
         themes: list[str],
         time_scope: str,
         limit: int,
+        strategy: str,
     ) -> dict[str, object] | None:
-        del query, event, themes, time_scope, limit
+        self.event_calls.append(
+            {
+                "query": query,
+                "event": event,
+                "themes": themes,
+                "time_scope": time_scope,
+                "limit": limit,
+                "strategy": strategy,
+            }
+        )
         return {
-            "summary_hint": "红海局势升级导致绕航和运价上行预期升温。",
-            "supporting_points": ["航线扰动加剧", "油运与航运链景气弹性提升"],
+            "summary_hint": "The disruption increased freight-rate sensitivity.",
+            "supporting_points": [
+                "Detour expectations rose.",
+                "Shipping chains tightened."
+            ],
             "evidence_refs": ["ext_ctx_001"],
+            "source_status": {
+                "mode": strategy,
+                "allow_local_rag": False,
+            },
+            "candidate_hints": ["COSCO", "China Merchants"],
         }
 
     def discover_candidates(
@@ -146,7 +226,7 @@ class _StubExternalContextRetriever:
     ) -> dict[str, object] | None:
         del query, event_context, limit
         return {
-            "candidates": ["中远海能", "招商轮船"],
+            "candidates": ["COSCO", "China Merchants"],
             "evidence_refs": ["ext_candidate_001"],
         }
 
@@ -161,53 +241,70 @@ class _StubTargetAnalysisService:
     ) -> dict[str, object]:
         del query, event_context, candidate_pool
         return {
-            "target_scope": ["中远海能", "招商轮船"],
+            "target_scope": ["COSCO", "China Merchants"],
             "ranked_targets": [
                 {
-                    "target": "中远海能",
+                    "target": "COSCO",
                     "target_type": "company",
                     "impact_direction": "positive",
-                    "reasoning_summary": "油运运价弹性与绕航逻辑更直接相关。",
+                    "reasoning_summary": "Rate elasticity is more direct for shipping carriers.",
                     "confidence": "medium",
                 }
             ],
-            "open_questions": ["仍需跟踪运价上行的持续性。"],
+            "open_questions": ["Duration of rate support still needs confirmation."],
             "confidence": "medium",
             "analysis_mode": "llm_constrained",
         }
 
 
 class EventImpactAnalysisFlowIntegrationTest(unittest.TestCase):
-    def test_event_impact_analysis_returns_report_with_targets_and_trace(self) -> None:
+    def test_event_impact_analysis_uses_classifier_before_planning_and_returns_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
+            classifier = _StubStrategyClassifier(strategy="dual_primary")
+            planner = _StubPlannerService()
+            external_context_retriever = _StubExternalContextRetriever()
             workbench_service = WorkbenchBackendApiService(
                 router_service=_StubRouterService(),
-                planner_service=_StubPlannerService(),
+                planner_service=planner,
                 orchestrator_service=OrchestratorService(
                     retrieval_facade=_StubRetrievalFacade(),
-                    external_context_retriever=_StubExternalContextRetriever(),
+                    external_context_retriever=external_context_retriever,
                     target_analysis_service=_StubTargetAnalysisService(),
                 ),
                 session_service=SessionService(
                     repository=SessionRepository(storage_dir=Path(temp_dir) / "sessions")
                 ),
+                retrieval_strategy_classifier=classifier,
             )
 
             envelope = workbench_service.build_response(
                 AnalysisRequest(
-                    query="红海局势升级利好哪些 A 股航运公司？",
+                    query="Which A-share shipping companies benefit from the Red Sea disruption?",
                     include_trace=True,
                 )
             )
 
         self.assertEqual(envelope.response.response_type, "success")
-        self.assertIn("中远海能", envelope.response.summary)
+        self.assertIn("Retrieved", envelope.response.summary)
         self.assertTrue(envelope.response.report_blocks)
         self.assertEqual(envelope.response.report_blocks[0]["block_type"], "evidence_overview")
         self.assertEqual(
             [block.block_type for block in envelope.trace_blocks],
             ["routing", "planning", "execution"],
         )
+        self.assertEqual(classifier.calls[0]["router_payload"]["intent"], "event_impact_analysis")
+        self.assertEqual(planner.calls[0]["strategy_payload"]["strategy"], "dual_primary")
+        self.assertEqual(external_context_retriever.event_calls[0]["strategy"], "dual_primary")
+        self.assertEqual(
+            envelope.trace_blocks[1].payload_summary["stages"],
+            [
+                "collect_event_context",
+                "analyze_targets",
+                "retrieve_evidence",
+                "synthesize_report",
+            ],
+        )
+        self.assertEqual(envelope.trace_blocks[1].payload_summary["strategy"], "dual_primary")
 
 
 if __name__ == "__main__":

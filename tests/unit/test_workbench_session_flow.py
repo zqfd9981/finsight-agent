@@ -30,14 +30,14 @@ class RecordingRouterService:
 
     def route(self, query: str, session_context: SessionContext | None = None) -> RouterResult:
         self.last_session_context = session_context
-        if "证据" in query or "展开" in query:
+        if "evidence" in query.lower() or "expand" in query.lower():
             return RouterResult(
                 intent="evidence_lookup",
                 follow_up_type="drilldown" if session_context else "none",
                 confidence="high",
                 entities={
-                    "target": "中远海能",
-                    "claim": "中远海能受益逻辑",
+                    "target": "COSCO",
+                    "claim": "COSCO may benefit from rate elasticity",
                 },
                 needs=["rag_retrieval"],
                 constraints={"preferred_output": "report"},
@@ -47,7 +47,7 @@ class RecordingRouterService:
             follow_up_type="none",
             confidence="high",
             entities={
-                "company": "宁德时代",
+                "company": "CATL",
                 "metric": "net_profit",
                 "time_scope": "2024_annual",
             },
@@ -57,7 +57,12 @@ class RecordingRouterService:
 
 
 class StubPlannerService:
-    def build_plan(self, router_result: RouterResult) -> Plan:
+    def build_plan(
+        self,
+        router_result: RouterResult,
+        strategy_payload: dict[str, str] | None = None,
+    ) -> Plan:
+        del strategy_payload
         if router_result.intent == "evidence_lookup":
             return Plan(
                 plan_id="plan_evidence_lookup_v1",
@@ -91,16 +96,16 @@ class StubOrchestratorService:
             response = FinalResponse(
                 response_type="success",
                 session_id=request.session_id or "",
-                summary="已检索到 1 条证据，可用于继续研判。",
+                summary="Retrieved 1 evidence item for deeper review.",
                 report_blocks=[
                     {
                         "block_type": "evidence_overview",
-                        "title": "证据概览",
+                        "title": "Evidence Overview",
                         "items": [
                             {
                                 "evidence_id": "ev_001",
-                                "excerpt": "中远海能受益于运价上涨。",
-                                "company_name": "中远海能",
+                                "excerpt": "COSCO may benefit from higher shipping rates.",
+                                "company_name": "COSCO",
                                 "doc_type": "annual_report",
                             }
                         ],
@@ -132,8 +137,8 @@ class StubOrchestratorService:
             final_response=FinalResponse(
                 response_type="success",
                 session_id=request.session_id or "",
-                summary="宁德时代 2024 年净利润为 520 亿元。",
-                next_actions=["可继续追问同比变化原因。"],
+                summary="CATL 2024 net profit was 52.0 billion RMB.",
+                next_actions=["Ask about the YoY change drivers."],
             ),
         )
 
@@ -156,7 +161,7 @@ class SessionServiceTest(unittest.TestCase):
                 follow_up_type="none",
                 confidence="high",
                 entities={
-                    "company": "宁德时代",
+                    "company": "CATL",
                     "metric": "net_profit",
                     "time_scope": "2024_annual",
                 },
@@ -172,7 +177,7 @@ class SessionServiceTest(unittest.TestCase):
             )
             orchestration_result = StubOrchestratorService().execute(
                 request=AnalysisRequest(
-                    query="宁德时代 2024 年净利润是多少？",
+                    query="CATL 2024 net profit?",
                     session_id="sess_metric",
                 ),
                 router_result=router_result,
@@ -182,7 +187,7 @@ class SessionServiceTest(unittest.TestCase):
 
             snapshot = service.build_snapshot(
                 request=AnalysisRequest(
-                    query="宁德时代 2024 年净利润是多少？",
+                    query="CATL 2024 net profit?",
                     session_id="sess_metric",
                 ),
                 router_result=router_result,
@@ -195,8 +200,8 @@ class SessionServiceTest(unittest.TestCase):
 
         self.assertIsNotNone(loaded_context)
         assert loaded_context is not None
-        self.assertEqual(loaded_context.active_topic, "宁德时代 2024_annual net_profit")
-        self.assertEqual(loaded_context.active_candidates, ["宁德时代"])
+        self.assertEqual(loaded_context.active_topic, "CATL 2024_annual net_profit")
+        self.assertEqual(loaded_context.active_candidates, [])
 
 
 class WorkbenchSessionFlowTest(unittest.TestCase):
@@ -212,7 +217,7 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             )
 
             envelope = service.build_response(
-                AnalysisRequest(query="宁德时代 2024 年净利润是多少？")
+                AnalysisRequest(query="CATL 2024 net profit?")
             )
 
             loaded = repository.load(envelope.session_id)
@@ -234,11 +239,11 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             )
 
             first_turn = service.build_response(
-                AnalysisRequest(query="宁德时代 2024 年净利润是多少？")
+                AnalysisRequest(query="CATL 2024 net profit?")
             )
             follow_up = service.build_response(
                 AnalysisRequest(
-                    query="继续展开一下同比变化原因。",
+                    query="Expand the YoY change drivers.",
                     query_mode="follow_up",
                     session_id=first_turn.session_id,
                 )
@@ -249,7 +254,7 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
         assert router_service.last_session_context is not None
         self.assertEqual(
             router_service.last_session_context.active_topic,
-            "宁德时代 2024_annual net_profit",
+            "CATL 2024_annual net_profit",
         )
 
     def test_workbench_persists_rolling_summary_after_follow_up(self) -> None:
@@ -264,11 +269,11 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             )
 
             first_turn = service.build_response(
-                AnalysisRequest(query="宁德时代 2024 年净利润是多少？")
+                AnalysisRequest(query="CATL 2024 net profit?")
             )
             service.build_response(
                 AnalysisRequest(
-                    query="继续展开一下同比变化原因。",
+                    query="Expand the YoY change drivers.",
                     query_mode="follow_up",
                     session_id=first_turn.session_id,
                 )
@@ -277,8 +282,8 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
 
         self.assertIsNotNone(loaded)
         assert loaded is not None
-        self.assertIn("上一轮已完成宁德时代 2024 年净利润查询", loaded.context.history_summary)
-        self.assertIn("已围绕中远海能受益逻辑继续展开", loaded.context.history_summary)
+        self.assertIn("CATL", loaded.context.history_summary)
+        self.assertIn("COSCO", loaded.context.history_summary)
 
     def test_workbench_degrades_when_session_snapshot_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -294,7 +299,7 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
 
             envelope = service.build_response(
                 AnalysisRequest(
-                    query="把中远海能受益逻辑的证据展开一下",
+                    query="Expand the evidence for COSCO.",
                     query_mode="follow_up",
                     session_id="sess_missing",
                 )

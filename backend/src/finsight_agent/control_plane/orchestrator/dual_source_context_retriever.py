@@ -6,23 +6,18 @@ from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
 from finsight_agent.control_plane.orchestrator.context_retriever import (
     ExternalContextRetriever,
 )
-from finsight_agent.control_plane.orchestrator.retrieval_strategy_classifier import (
-    DEFAULT_RETRIEVAL_STRATEGY,
-)
 
 
 class DualSourceExternalContextRetriever(ExternalContextRetriever):
-    """协调事件搜索源与官方披露源，产出统一的外部上下文结果。"""
+    """Merge event search and disclosure search into one event-context payload."""
 
     def __init__(
         self,
         *,
-        classifier,
         planner,
         event_search_provider,
         disclosure_search_provider,
     ) -> None:
-        self._classifier = classifier
         self._planner = planner
         self._event_search_provider = event_search_provider
         self._disclosure_search_provider = disclosure_search_provider
@@ -35,6 +30,7 @@ class DualSourceExternalContextRetriever(ExternalContextRetriever):
         themes: list[str],
         time_scope: str,
         limit: int,
+        strategy: str,
     ) -> dict[str, object] | None:
         router_payload = {
             "intent": "event_impact_analysis",
@@ -44,30 +40,15 @@ class DualSourceExternalContextRetriever(ExternalContextRetriever):
                 "time_scope": time_scope,
             },
         }
-        strategy_payload = self._classifier.classify(
-            query=query,
-            router_payload=router_payload,
-            session_topic="",
-        )
         plan = self._planner.build_plan(
-            strategy_payload=strategy_payload,
+            strategy_payload={"strategy": strategy},
             router_payload=router_payload,
         )
 
-        # 透传 classifier 决策到 source_status，让上游可观察实际走的策略来源
-        reason_value = str(strategy_payload.get("reason") or "")
-        strategy_source = (
-            "stub_fallback"
-            if reason_value.startswith("stub_fallback")
-            else "trained"
-        )
         merged = ExternalContextResult(
             source_status={
-                "mode": plan.mode or DEFAULT_RETRIEVAL_STRATEGY,
+                "mode": plan.mode or strategy,
                 "allow_local_rag": plan.allow_local_rag,
-                "strategy_reason": reason_value,
-                "strategy_confidence": str(strategy_payload.get("confidence") or "low"),
-                "strategy_source": strategy_source,
             }
         )
 

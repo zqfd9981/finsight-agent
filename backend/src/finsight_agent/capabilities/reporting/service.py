@@ -14,7 +14,7 @@ from .final_answer_writer import FinalAnswerWriter
 
 
 class ReportingService:
-    """V1 reporting service with optional LLM-written final answer."""
+    """Reporting service with optional LLM-written final answer."""
 
     def __init__(self, *, llm_client=None, final_answer_writer: FinalAnswerWriter | None = None) -> None:
         if final_answer_writer is not None:
@@ -107,9 +107,13 @@ class ReportingService:
     ) -> str:
         parts = [summary.strip()]
         if uncertainty_notes:
-            parts.append("需要注意：" + "；".join(str(item).strip() for item in uncertainty_notes if str(item).strip()))
+            parts.append(
+                "Notes: " + "; ".join(str(item).strip() for item in uncertainty_notes if str(item).strip())
+            )
         if next_actions:
-            parts.append("如需继续分析：" + "；".join(str(item).strip() for item in next_actions if str(item).strip()))
+            parts.append(
+                "Next: " + "; ".join(str(item).strip() for item in next_actions if str(item).strip())
+            )
         return "\n\n".join(part for part in parts if part)
 
     def _validate_report_block(self, block: ReportBlock) -> ReportBlock:

@@ -1,4 +1,4 @@
-# FinSight Query 路由与节点链路说明（业务视角）
+# FinSight Query Routing 与 Stage Flow 业务说明
 
 日期：2026-07-08
 
@@ -8,30 +8,63 @@
 
 这份文档的目标是：
 
-- 用业务语言说明 FinSight 现在不同问题是怎么走链路的
-- 说明我们在这次讨论里收敛出的理想链路应该是什么样
-- 说明哪些问题需要新闻，哪些问题需要公告，哪些问题需要公司证据
-- 说明关键中间字段应该承载什么信息，避免后面再把链路设计得过重或过乱
+- 用业务语言说明 FinSight 里不同类型 query 应该怎么走链路
+- 明确当前这次改造完成后的目标架构
+- 保留链路、字段、query 类型、职责边界和中间对象的完整说明
+- 避免后续又退回到“先保留旧链路、以后再补”的口径
 
+## 2. 一步到位的总原则
 
-## 2. 先说结论
+### 2.1 `event_impact_analysis` 不能先固定 stage 再分类
 
-当前系统最核心的问题不是“没有分类器”，而是：
+这次改造完成后的原则是：
 
-- `event_impact_analysis` 一旦命中，planner 现在几乎固定走四段链路
-- 现有 `event_primary / disclosure_primary / dual_primary` 分类结果，只影响“优先搜什么源”
-- 这个分类结果还没有真正上升为“决定 stage 编排”的信号
+- 对于 `intent = event_impact_analysis`
+- 必须先做 retrieval strategy classify
+- 再由 planner 根据 classifier label 编排 stage
 
-我们这次讨论后的理想方向是：
+也就是：
 
-- `metric_lookup`、`evidence_lookup` 继续走自己的短链路
-- 只有 `intent = event_impact_analysis` 时，才进入检索策略分类
-- 分类器输出 `event_primary / disclosure_primary / dual_primary`
-- planner 再根据这个 label 决定后续 stage 组合
-- 不新增 router 字段作为第一步改造前提
+`router -> retrieval strategy classifier -> planner -> stage execution`
 
+而不是：
 
-## 3. 当前系统里实际存在的几类能力
+`router -> planner 固定四段 -> collect_event_context 内部再分类`
+
+### 2.2 `event_primary / disclosure_primary / dual_primary` 不只是检索标签
+
+改造完成后，这 3 个 label 同时承担两层职责：
+
+- 决定外部上下文优先从哪里获取
+- 决定后续 stage 应该如何编排
+
+### 2.3 `collect_event_context` 只负责收集上下文，不再负责决定 strategy
+
+改造完成后：
+
+- `collect_event_context` 不再内部调用 strategy classifier
+- 它只消费上游已经确定好的 `strategy`
+- 它只负责按 strategy 执行新闻搜索、公告搜索或双源搜索，并输出统一 `event_context`
+
+### 2.4 `retrieve_evidence` 是本地 RAG，不是外部搜索
+
+`retrieve_evidence` 的职责必须保持明确：
+
+- 它查的是本地入库文档、公告正文、财报 chunk
+- 它负责提供公司级、正文级、证据级支撑
+- 它不负责补外部事件背景
+
+### 2.5 这次改造要直接落到正式目标态
+
+这次文档口径保留的就是正式目标态，而不是过渡态：
+
+- classifier 前移
+- planner 按 classifier label 分叉
+- `synthesize_event_answer` 作为正式 stage 存在
+- `collect_event_context` 去掉内部分类职责
+- `event_impact_analysis` 不再统一固定四段链路
+
+## 3. 当前业务里存在的顶层能力
 
 ### 3.1 顶层 intent
 
@@ -42,173 +75,72 @@
 - `evidence_lookup`
 - `out_of_scope`
 
-含义可以简单理解为：
+可以简单理解为：
 
 - `metric_lookup`：问一个结构化数值
 - `event_impact_analysis`：问一个事件或事件影响
 - `evidence_lookup`：要证据、原文、依据
 - `out_of_scope`：超出能力范围
 
-### 3.2 当前系统已有的 stage
+### 3.2 当前 stage 体系
 
-当前共享 stage 枚举有 6 个：
+当前保留的正式 stage 包括：
 
+- `query_structured_data`
+- `synthesize_brief_answer`
 - `collect_event_context`
 - `analyze_targets`
 - `retrieve_evidence`
 - `synthesize_report`
-- `query_structured_data`
-- `synthesize_brief_answer`
+- `synthesize_event_answer`
 
-业务上可以这么理解：
+业务上可以这样理解：
 
-- `collect_event_context`：补外部事件背景
-- `analyze_targets`：从事件背景收缩到板块/公司/标的候选
-- `retrieve_evidence`：去内部证据库补证据
-- `synthesize_report`：生成偏完整的分析答复
 - `query_structured_data`：查结构化指标
 - `synthesize_brief_answer`：生成简短指标答复
+- `collect_event_context`：补外部事件背景
+- `analyze_targets`：从事件背景收缩到板块、公司、标的候选
+- `retrieve_evidence`：去本地证据库补公司/公告/正文证据
+- `synthesize_report`：生成偏完整的公司/公告/证据型分析答复
+- `synthesize_event_answer`：直接基于事件背景回答“发生了什么、影响什么、为什么”
 
-### 3.3 当前系统已有的两类外部上下文接口
+### 3.3 当前外部上下文的两类来源
 
-当前外部上下文检索已经天然拆成两类接口：
+当前外部上下文天然分成两类来源：
 
 - 新闻搜索 `event_search`
-  - 当前实现是 Bocha
 - 公告搜索 `disclosure_search`
-  - 当前实现是 CNInfo + SSE 聚合
 
-所以接口层其实已经拆开了，当前真正还没拆开的，是：
+因此真正需要通过这次改造明确的，不是“接口要不要拆”，而是：
 
-- 什么时候只用新闻
-- 什么时候只用公告
-- 什么时候两者都用
+- 什么场景优先走事件背景
+- 什么场景优先走公告背景
+- 什么场景需要双源结合
 
+## 4. query 类型与正式链路
 
-## 4. 当前系统里不同 query 的实际执行路径
+为了让链路更清楚，这里不只看顶层 `intent`，而是看用户到底在问什么类型的问题。
 
-这一节只描述“现在代码里大体怎么走”，不讨论理想情况。
-
-### 4.1 结构化指标查询
+### 4.1 `metric_lookup`
 
 示例：
 
 - `宁德时代 2024H1 利润多少`
 - `贵州茅台 2024 营收是多少`
 
-当前路径：
+正式链路：
 
-`router -> metric_lookup -> planner -> query_structured_data -> synthesize_brief_answer`
+`query_structured_data -> synthesize_brief_answer`
 
-这条路径是合理的。
-
-它不需要：
-
-- 新闻搜索
-- 公告搜索
-- 事件背景
-- 候选池
-
-### 4.2 事件影响分析
-
-示例：
-
-- `红海局势升级对 A 股哪些板块有影响`
-- `红海局势升级利好哪些 A 股航运股`
-- `宁德时代扩产公告意味着什么`
-
-当前路径大体都是：
-
-`router -> event_impact_analysis -> planner -> collect_event_context -> analyze_targets -> retrieve_evidence -> synthesize_report`
-
-也就是说，现在 planner 对 `event_impact_analysis` 基本采用固定四段链路。
-
-其中：
-
-- `collect_event_context` 内部才会再调用分类器
-- 分类器输出 `event_primary / disclosure_primary / dual_primary`
-- 然后只影响 `collect_event_context` 内部优先搜新闻还是公告
-
-这会带来一个问题：
-
-- 问“哪些板块”的 query，往往不需要 `analyze_targets`
-- 问“某公司公告意味着什么”的 query，往往也不需要候选池
-- 但当前系统会统一多走很多步
-
-### 4.3 证据追问
-
-示例：
-
-- `中远海能受益的依据是什么`
-- `把宁德时代扩产逻辑的证据展开`
-
-当前路径：
-
-`router -> evidence_lookup -> planner -> retrieve_evidence -> synthesize_report`
-
-这条路径整体是合理的，因为这类 query 的目标就是补证据。
-
-
-## 5. 当前系统里已经有的分类器在做什么
-
-当前检索策略分类器只在 `intent = event_impact_analysis` 时才有意义。
-
-它的 3 个 label 是：
-
-- `event_primary`
-- `disclosure_primary`
-- `dual_primary`
-
-业务含义不是“最终回答类型”，而是“外部上下文优先从哪里拿”：
-
-- `event_primary`
-  - 事件新闻优先
-- `disclosure_primary`
-  - 公司公告优先
-- `dual_primary`
-  - 事件新闻 + 公司公告都重要
-
-注意：
-
-- 这 3 个 label 当前更像“检索策略”
-- 还没有真正变成“执行路径”
-
-但在我们这次讨论里，已经收敛出一个更实用的方向：
-
-- 第一阶段不新增 router 字段
-- 直接让这 3 个 label 上升为 planner 编排 stage 的输入信号
-
-
-## 6. 理想中的 query 类型与链路
-
-为了让链路更清晰，这里不再只看顶层 intent，而是看“用户到底在问什么类型的问题”。
-
-我们这次讨论收敛出的理想 query 类型有 5 类。
-
-### 6.1 `metric_lookup`
-
-示例：
-
-- `宁德时代 2024H1 利润多少`
-- `贵州茅台 2024 营收是多少`
-
-目标：
-
-- 要一个明确的结构化数值
-
-理想路径：
-
-`router -> metric_lookup -> query_structured_data -> synthesize_brief_answer`
-
-不需要：
+这类 query 不需要：
 
 - 新闻
 - 公告
 - 事件背景
-- 候选池
+- 候选标的
 - 公司证据检索
 
-### 6.2 `event_context_answer`
+### 4.2 `event_context_answer`
 
 示例：
 
@@ -221,19 +153,19 @@
 - 要事件演化
 - 要影响链条
 - 可能要板块级归纳
-- 但不一定要收缩到具体公司
+- 不要求系统收缩到具体公司
 
-理想路径：
+正式链路：
 
-`router -> event_impact_analysis -> classifier -> collect_event_context -> synthesize_event_answer`
+`router -> event_impact_analysis -> classifier(event_primary) -> planner -> collect_event_context -> synthesize_event_answer`
 
-这类 query 的关键点：
+关键点：
 
 - 搜完事件背景后通常就可以答
-- 没必要强行走 `analyze_targets`
-- 也没必要默认继续 `retrieve_evidence`
+- 不应该进入 `analyze_targets`
+- 不应该默认进入 `retrieve_evidence`
 
-### 6.3 `target_discovery`
+### 4.3 `target_discovery`
 
 示例：
 
@@ -243,19 +175,19 @@
 目标：
 
 - 不是只理解事件
-- 而是要从事件进一步收缩到具体板块 / 公司 / 标的
+- 而是要从事件进一步收缩到具体板块、公司、标的
 
-理想路径：
+正式链路：
 
-`router -> event_impact_analysis -> classifier -> collect_event_context -> analyze_targets -> retrieve_evidence -> synthesize_report`
+`router -> event_impact_analysis -> classifier(dual_primary) -> planner -> collect_event_context -> analyze_targets -> retrieve_evidence -> synthesize_report`
 
-这类 query 的关键点：
+关键点：
 
-- `analyze_targets` 在这里是有必要的
-- `retrieve_evidence` 也有必要
-- 这是当前四段链路最合理的适用场景
+- `analyze_targets` 是必要步骤
+- `retrieve_evidence` 也是必要步骤
+- 这是完整重链路真正该出现的场景
 
-### 6.4 `disclosure_interpretation`
+### 4.4 `disclosure_interpretation`
 
 示例：
 
@@ -265,20 +197,20 @@
 
 目标：
 
-- 解读公司公告 / 业绩预告 / 公司内生事件
+- 解读公司公告、业绩预告、公司内生事件
 - 重点是正式披露了什么、释放了什么信号
 
-理想路径：
+正式链路：
 
-`router -> event_impact_analysis -> classifier -> collect_event_context -> retrieve_evidence -> synthesize_report`
+`router -> event_impact_analysis -> classifier(disclosure_primary) -> planner -> collect_event_context -> retrieve_evidence -> synthesize_report`
 
-这类 query 的关键点：
+关键点：
 
-- 目标公司通常已经比较明确
+- 目标公司通常已经明确
 - 重点是公告和公司证据
-- 一般不需要 `analyze_targets`
+- 不应进入 `analyze_targets`
 
-### 6.5 `evidence_lookup`
+### 4.5 `evidence_lookup`
 
 示例：
 
@@ -289,143 +221,176 @@
 
 - 直接索要证据
 
-理想路径：
+正式链路：
 
 `router -> evidence_lookup -> retrieve_evidence -> synthesize_report`
 
-这类 query 的关键点：
+关键点：
 
 - 不需要事件背景
 - 不需要候选池
 - 重点是证据补全和证据组织
 
+## 5. `event_impact_analysis` 的正式总流程
 
-## 7. 理想中的“分类器 label -> stage 路径”关系
+改造完成后的总流程应是：
 
-我们最终讨论后更倾向的第一阶段方案是：
+`router -> intent=event_impact_analysis -> retrieval strategy classifier -> planner -> stage execution`
 
-- 不给 router 新增字段
-- 只有 `intent = event_impact_analysis` 时，调用分类器
-- planner 根据分类器输出的 label 编排 stage
+其中：
 
-在当前这批 query 里，3 个 label 和理想路径的关系可以先收敛成下面这样：
+- router 负责顶层 `intent` 和基础 entities 抽取
+- classifier 负责判断 `event_primary / disclosure_primary / dual_primary`
+- planner 负责根据 classifier label 生成 stage 列表
+- stage runner 只执行，不再补做路径判断
 
-### 7.1 `event_primary`
+### 5.1 classifier 的位置
+
+classifier 应该位于 planner 之前，而不是 `collect_event_context` 内部。
+
+这是这次文档要保留的正式口径，不是可选项。
+
+### 5.2 `collect_event_context` 的职责边界
+
+改造完成后，`collect_event_context` 的职责是：
+
+- 接收 `query`、`event`、`themes`、`time_scope`、`strategy`
+- 根据 strategy 决定使用：
+  - `event_search`
+  - `disclosure_search`
+  - 或双源都用
+- 合并结果，输出统一 `event_context`
+
+它不再负责：
+
+- 自己调用 classifier
+- 自己决定 stage 走向
+
+## 6. classifier label 与 stage 链路的正式映射
+
+### 6.1 `event_primary`
 
 适合：
 
 - `红海局势最近怎么了`
 - `红海局势升级对 A 股哪些板块有影响`
 
-理想路径：
+必须映射到：
 
 `collect_event_context -> synthesize_event_answer`
 
-### 7.2 `disclosure_primary`
+### 6.2 `disclosure_primary`
 
 适合：
 
 - `宁德时代扩产公告意味着什么`
 - `某公司业绩预告是否释放积极信号`
 
-理想路径：
+必须映射到：
 
 `collect_event_context -> retrieve_evidence -> synthesize_report`
 
-### 7.3 `dual_primary`
+### 6.3 `dual_primary`
 
 适合：
 
 - `红海局势升级利好哪些 A 股航运股`
 
-理想路径：
+必须映射到：
 
 `collect_event_context -> analyze_targets -> retrieve_evidence -> synthesize_report`
 
-备注：
+这意味着：
 
-- 这说明分类器完全可以不只影响“搜什么源”
-- 在第一阶段，它已经可以直接影响“后面要不要继续跑哪些 stage”
+- classifier 不再只是“搜什么源”的提示器
+- classifier 已经正式成为 planner 的路径选择输入
 
+## 7. 新闻搜索与公告搜索的职责分工
 
-## 8. 为什么新闻搜索和公告搜索应该逻辑拆开
+### 7.1 新闻搜索负责什么
 
-当前系统里新闻搜索和公告搜索已经是两个接口，所以这里讨论的不是“接口要不要拆”，而是“执行策略要不要拆”。
+新闻搜索负责：
 
-答案是：有必要按场景拆。
+- 近期事件发生了什么
+- 事件如何演化
+- 市场通常如何理解影响链条
 
-### 8.1 只搜新闻就够的场景
+适用于：
 
-示例：
+- 国际局势
+- 宏观事件
+- 行业突发
+- 政策变化
 
-- `红海局势最近怎么了`
-- `美国加征关税会影响哪些板块`
+### 7.2 公告搜索负责什么
 
-这类 query 更关心：
-
-- 近期发生了什么
-- 事件怎么演化
-- 影响传导链是什么
-
-这类场景里：
-
-- 新闻是主源
-- 公告不是主源
-
-### 8.2 只搜公告就够的场景
-
-示例：
-
-- `宁德时代扩产公告意味着什么`
-- `某公司业绩预告是否释放积极信号`
-
-这类 query 更关心：
+公告搜索负责：
 
 - 公司正式披露了什么
-- 释放了什么边际信号
-- 标题、措辞、数字、时间点意味着什么
+- 标题、数字、时间点、措辞意味着什么
+- 公告级事实发现
 
-这类场景里：
+适用于：
 
-- 公告是主源
-- 新闻容易成为噪音
+- 扩产公告
+- 业绩预告
+- 回购、减持、定增、重组
+- 公司内生重大事项
 
-### 8.3 新闻和公告都要的场景
+### 7.3 双源都需要的场景
 
-示例：
+典型场景是：
+
+- 外部事件先影响行业
+- 再落到具体上市公司
+
+例如：
 
 - `红海局势升级利好哪些 A 股航运股`
 
-这类 query 同时需要：
+这时：
 
-- 事件背景
-- 公司层面验证
+- 新闻负责提供外部事件背景
+- 公告和公司文档负责验证公司侧受益逻辑
 
-这类场景里：
+## 8. 关键中间字段应该承载什么
 
-- 新闻和公告都需要
+这一节保留字段级说明和举例。
 
-
-## 9. 关键中间字段应该承载什么
-
-这一节只写业务上应该怎么理解，不按底层代码逐行展开。
-
-### 9.1 `RouterResult`
+### 8.1 `RouterResult`
 
 建议业务理解：
 
 - `intent`
-  - 这是第一层大分流
+  - 第一层大分流
 - `follow_up_type`
-  - 这是多轮场景的附加信号
+  - 多轮场景附加信号
 - `entities`
-  - 这是本轮 query 抽出来的关键语义实体
+  - 本轮 query 抽出的关键语义实体
 - `constraints`
-  - 这是 planner 可消费的执行提示
+  - planner 可消费的执行提示
 
-当前不建议第一步就给 router 再加新字段。
+示例：
 
-### 9.2 分类器输出 `strategy_payload`
+```json
+{
+  "intent": "event_impact_analysis",
+  "follow_up_type": "none",
+  "confidence": "high",
+  "entities": {
+    "event": "红海局势升级",
+    "themes": ["航运", "油运"],
+    "time_scope": "recent"
+  },
+  "needs": ["news_search", "concept_mapping", "rag_retrieval"],
+  "constraints": {
+    "time_hint": "recent",
+    "preferred_output": "report"
+  }
+}
+```
+
+### 8.2 classifier 输出 `strategy_payload`
 
 建议至少保留：
 
@@ -436,19 +401,25 @@
 - `reason: str`
   - 调试和回放用
 
-业务理解：
+示例：
 
-- 这是“事件类问题该优先从哪类外部上下文切入”
+```json
+{
+  "strategy": "dual_primary",
+  "confidence": "high",
+  "reason": "query asks for affected A-share shipping stocks, so both event background and company-side validation are needed"
+}
+```
 
-### 9.3 `Plan`
+### 8.3 `Plan`
 
 建议业务理解：
 
-- `plan_id: str`
-- `intent: str`
-- `stages: list[str]`
-- `stage_constraints: dict[str, object]`
-- `response_mode: str`
+- `plan_id`
+- `intent`
+- `stages`
+- `stage_constraints`
+- `response_mode`
 
 其中最关键的是：
 
@@ -457,11 +428,103 @@
 - `stage_constraints`
   - 决定每个 stage 的预算、模式和提示
 
-### 9.4 `collect_event_context` 的核心输出 `event_context`
+改造完成后，`Plan` 必须已经体现 classifier 带来的 stage 分叉。
 
-这层不建议做成太重的结构化 schema。
+#### `event_primary` 示例
 
-我们这次讨论更倾向一个“轻结构”：
+```json
+{
+  "plan_id": "plan_event_impact_analysis_event_primary_v1",
+  "intent": "event_impact_analysis",
+  "stages": [
+    "collect_event_context",
+    "synthesize_event_answer"
+  ],
+  "stage_constraints": {
+    "collect_event_context": {
+      "time_hint": "recent",
+      "retrieval_budget": 3,
+      "strategy": "event_primary",
+      "strategy_confidence": "high",
+      "strategy_reason": "event background question"
+    },
+    "synthesize_event_answer": {
+      "preferred_output": "brief_answer"
+    }
+  },
+  "response_mode": "brief_answer"
+}
+```
+
+#### `disclosure_primary` 示例
+
+```json
+{
+  "plan_id": "plan_event_impact_analysis_disclosure_primary_v1",
+  "intent": "event_impact_analysis",
+  "stages": [
+    "collect_event_context",
+    "retrieve_evidence",
+    "synthesize_report"
+  ],
+  "stage_constraints": {
+    "collect_event_context": {
+      "time_hint": "recent",
+      "retrieval_budget": 3,
+      "strategy": "disclosure_primary",
+      "strategy_confidence": "high",
+      "strategy_reason": "disclosure interpretation question"
+    },
+    "retrieve_evidence": {
+      "retrieval_budget": 4
+    },
+    "synthesize_report": {
+      "preferred_output": "report"
+    }
+  },
+  "response_mode": "report"
+}
+```
+
+#### `dual_primary` 示例
+
+```json
+{
+  "plan_id": "plan_event_impact_analysis_dual_primary_v1",
+  "intent": "event_impact_analysis",
+  "stages": [
+    "collect_event_context",
+    "analyze_targets",
+    "retrieve_evidence",
+    "synthesize_report"
+  ],
+  "stage_constraints": {
+    "collect_event_context": {
+      "time_hint": "recent",
+      "retrieval_budget": 3,
+      "strategy": "dual_primary",
+      "strategy_confidence": "high",
+      "strategy_reason": "target discovery question"
+    },
+    "analyze_targets": {
+      "target_scope": ["航运"]
+    },
+    "retrieve_evidence": {
+      "retrieval_budget": 4
+    },
+    "synthesize_report": {
+      "preferred_output": "report"
+    }
+  },
+  "response_mode": "report"
+}
+```
+
+### 8.4 `collect_event_context` 的核心输出 `event_context`
+
+这一层不建议做得过重，最合适的是轻结构。
+
+示例：
 
 ```json
 {
@@ -483,13 +546,13 @@
 - `context_summary`
   - 给后续 LLM 看的主内容
 - `supporting_points`
-  - 给后续 LLM 和前端 trace 看
+  - 给 trace 和回答引用看的摘要支点
 - `evidence_refs`
   - 用于回溯来源
 - `candidate_hints`
   - 仅在需要继续做标的发现时使用
 
-### 9.5 `analyze_targets` 的输出
+### 8.5 `analyze_targets` 的输出
 
 这一层和 `event_context` 不一样，应该继续保持结构化。
 
@@ -503,36 +566,52 @@
 
 其中 `ranked_targets` 的单项建议至少包括：
 
-- `target: str`
-- `target_type: str`
-- `impact_direction: str`
-- `reasoning_summary: str`
-- `confidence: str`
+- `target`
+- `target_type`
+- `impact_direction`
+- `reasoning_summary`
+- `confidence`
+
+示例：
+
+```json
+{
+  "target_scope": ["航运", "油运"],
+  "ranked_targets": [
+    {
+      "target": "中远海能",
+      "target_type": "company",
+      "impact_direction": "positive",
+      "reasoning_summary": "油运链条对航线绕行和运价弹性更敏感。",
+      "confidence": "medium"
+    }
+  ],
+  "open_questions": [
+    "运价上行是否足以传导到具体公司盈利"
+  ],
+  "confidence": "medium",
+  "analysis_mode": "llm_constrained"
+}
+```
+
+### 8.6 `retrieve_evidence` 的输出
 
 业务理解：
 
-- 这一步不是最终回答
-- 这一步只是把“事件背景”收缩成“值得继续补证据的对象”
-
-### 9.6 `retrieve_evidence` 的输出
-
-业务理解：
-
-- 这一步的结果是公司/公告/内部证据块集合
+- 这一层的结果是公司、公告、内部证据块集合
 - 不负责事件背景补全
 - 只负责围绕目标补证据
 
-所以它输出里最关键的不是摘要，而是：
+因此它输出里最关键的不是摘要，而是：
 
 - `retrieval_result`
 - `evidence_refs`
 
+## 9. 最终喂给 LLM 的内容粒度
 
-## 10. 最终喂给 LLM 的内容粒度应该是什么
+最终喂给 LLM 的内容，不应只是标题，也不应直接灌全文。
 
-这是我们这次讨论里非常重要的一个结论。
-
-结论不是“只喂标题”，也不是“直接喂全文”，而是：
+最合适的粒度是：
 
 - 标题级别：用于召回、粗筛、排序
 - 正文摘要级别：用于主推理
@@ -541,96 +620,108 @@
 对应到系统里：
 
 - `collect_event_context`
-  - 最适合输出一个自然语言 `context_summary`
+  - 输出自然语言 `context_summary`
 - `analyze_targets`
-  - 继续消费这个摘要和候选信息
+  - 消费 `context_summary` 和候选信息
 - `synthesize_event_answer / synthesize_report`
-  - 再基于事件摘要和证据完成回答
+  - 基于事件摘要和证据完成回答
 
-所以事件背景层更适合：
+所以事件背景层最适合：
 
 - “轻结构 + 摘要 string”
 
 而不是：
 
-- 非常重的 rigid schema
+- 很重的 rigid schema
 
+## 10. router 的边界
 
-## 11. 当前 router 的主要风险点
-
-### 11.1 规则 router 对事件/公告边界判断还比较脆
+### 10.1 当前规则 router 的主要风险
 
 例如：
 
 - `某公司业绩预告是否释放积极信号`
 
-这种 query 在当前规则 router 下有两个风险：
+这类 query 在规则 router 下有两个风险：
 
 - 可能直接识别不出来
-- 如果带了具体公司名和 `净利润/营收` 等词，也可能被错导到 `metric_lookup`
+- 如果带了具体公司名和 `净利润/营收` 等词，也可能被误导到 `metric_lookup`
 
 这说明：
 
-- 规则 router 在“查数值”与“解读公告”之间的边界处理仍然偏弱
+- router 在“查数值”和“解读公告”之间的边界处理仍然偏弱
 
-### 11.2 router 后续更适合演进到 LLM 主判
+### 10.2 这次改造对 router 的要求
 
-我们这次讨论后的倾向是：
+这次文档口径不要求先把 router 全面 LLM 化。
 
-- 中长期 router 应该切到 LLM 主判
-- 规则保留为 guardrail / fallback
+这次改造只要求做到：
 
-但这是后续演进方向，不是这份文档的近期重点。
+- router 继续稳定产出顶层 `intent`
+- `intent = event_impact_analysis` 时，系统必须立刻进入 classifier
+- classifier 结果必须真正影响 planner
 
+也就是说，这次的一步到位目标是：
 
-## 12. 这次讨论收敛后的最小改造方向
+- 先把“分类前移 + planner 分叉 + stage 重构”做完整
 
-如果只按这次会话讨论出的共识，近期最小改造可以收敛成下面几条：
+而不是：
 
-### 12.1 不先改 router 字段
+- 在同一次改造里把 router 一并重做
 
-第一阶段不必给 `RouterResult` 增加新的业务枚举字段。
+## 11. 这次改造完成后的目标状态
 
-### 12.2 只在 `intent = event_impact_analysis` 时调用分类器
+### 11.1 执行框架目标
 
-分类器仍然只服务事件类问题。
+- 保留现有顶层 intent
+- 对 `event_impact_analysis` 引入“先分类、后规划”
+- 让 planner 正式按 classifier label 分叉
+- 去掉 `collect_event_context` 内部的 classifier 调用
 
-### 12.3 让分类器 label 直接参与 planner 编排
+### 11.2 stage 体系目标
 
-让 planner 根据：
+- 保留：
+  - `collect_event_context`
+  - `analyze_targets`
+  - `retrieve_evidence`
+  - `synthesize_report`
+  - `query_structured_data`
+  - `synthesize_brief_answer`
+- 正式引入：
+  - `synthesize_event_answer`
 
-- `event_primary`
-- `disclosure_primary`
-- `dual_primary`
+### 11.3 query 路径目标
 
-来决定后续 stage。
-
-### 12.4 把事件类 query 从“固定四段链路”改成“按问题类型最小化执行”
-
-推荐的近期映射：
-
+- `metric_lookup`
+  - `query_structured_data -> synthesize_brief_answer`
 - `event_primary`
   - `collect_event_context -> synthesize_event_answer`
 - `disclosure_primary`
   - `collect_event_context -> retrieve_evidence -> synthesize_report`
 - `dual_primary`
   - `collect_event_context -> analyze_targets -> retrieve_evidence -> synthesize_report`
+- `evidence_lookup`
+  - `retrieve_evidence -> synthesize_report`
 
-### 12.5 `collect_event_context` 保持轻结构输出
+### 11.4 职责边界目标
 
-核心是：
+- 新闻搜索负责事件背景
+- 公告搜索负责正式披露发现
+- `retrieve_evidence` 负责本地正文证据
+- `analyze_targets` 只在真正需要从事件走向标的时出现
 
-- `context_summary`
-- `supporting_points`
-- `evidence_refs`
-- `candidate_hints`
+### 11.5 这次改造不再保留的旧逻辑
 
-不要把它做成过重的 rigid schema。
+改造完成后，不应再保留以下逻辑作为主路径：
 
+- `event_impact_analysis` 统一固定四段链路
+- `collect_event_context` 内部再决定 strategy
+- `event_primary` 也默认进入 `analyze_targets`
+- `disclosure_primary` 也默认进入候选池
 
-## 13. 最后一页：最实用的总表
+## 12. 最实用的总表
 
-| 用户问题类型 | 典型 query | 是否需要新闻 | 是否需要公告 | 是否需要候选池 | 是否需要公司证据 | 理想链路 |
+| 用户问题类型 | 典型 query | 是否需要新闻 | 是否需要公告 | 是否需要候选池 | 是否需要公司证据 | 正式链路 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `metric_lookup` | 宁德时代 2024H1 利润多少 | 否 | 否 | 否 | 否 | `query_structured_data -> synthesize_brief_answer` |
 | `event_context_answer` | 红海局势最近怎么了 | 是 | 视情况 | 否 | 否 | `collect_event_context -> synthesize_event_answer` |
@@ -640,14 +731,11 @@
 | `disclosure_interpretation` | 某公司业绩预告是否释放积极信号 | 否或弱需要 | 是 | 否 | 是 | `collect_event_context -> retrieve_evidence -> synthesize_report` |
 | `evidence_lookup` | 中远海能受益的依据是什么 | 否 | 否 | 否 | 是 | `retrieve_evidence -> synthesize_report` |
 
-
-## 14. 这份文档的使用方式
-
-后面如果再讨论链路，可以优先先回答这 4 个问题：
+## 13. 用这份文档看后续改造时，只需要先回答 4 个问题
 
 1. 这条 query 到底是在要数值、背景、板块、标的，还是证据？
-2. 外部上下文应以新闻为主，公告为主，还是双源都要？
+2. 外部上下文应以新闻为主、公告为主，还是双源都要？
 3. 这次是否真的需要 `analyze_targets`？
-4. 这次最终应该给 LLM 喂的是事件摘要，还是公司证据，还是两者都要？
+4. 这次最终应给 LLM 喂的是事件摘要、公司证据，还是两者都要？
 
-只要这 4 个问题先答清楚，后面的 stage 编排就不会再轻易失控。
+只要这 4 个问题先答清楚，stage 编排就不容易再失控。

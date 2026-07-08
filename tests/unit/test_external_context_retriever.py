@@ -29,10 +29,10 @@ class RetrievalStrategyClassifierContractTest(unittest.TestCase):
 
         classifier = StubRetrievalStrategyClassifier()
         payload = classifier.classify(
-            query="红海局势升级利好哪些A股航运股？",
+            query="Who benefits from the Red Sea disruption?",
             router_payload={
                 "intent": "event_impact_analysis",
-                "entities": {"event": "红海局势升级"},
+                "entities": {"event": "Red Sea disruption"},
             },
             session_topic="",
         )
@@ -51,21 +51,21 @@ class ContextRetrievalModelsTest(unittest.TestCase):
         )
 
         item = ExternalContextItem(
-            title="红海局势升级影响航线",
+            title="Event background",
             source="bocha",
             publish_date="2026-07-02",
             url="https://example.com/a",
-            snippet="航线扰动加剧。",
+            snippet="Route disruption intensified.",
             company_names=[],
             company_codes=[],
-            themes=["航运"],
+            themes=["shipping"],
         )
         result = ExternalContextResult(
             items=[item],
-            summary_hint="事件背景已提炼",
-            supporting_points=["航线扰动加剧"],
+            summary_hint="Event context collected.",
+            supporting_points=["Detours increased."],
             evidence_refs=["bocha:item_001"],
-            candidate_hints=["航运"],
+            candidate_hints=["shipping"],
             source_status={"bocha_used": True},
         )
         plan = ContextRetrievalPlan(
@@ -99,25 +99,27 @@ class _StubDisclosureProvider:
 
 class _StubPlanner:
     def build_plan(self, *, strategy_payload, router_payload):
-        del strategy_payload, router_payload
+        del router_payload
         from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
             ContextRetrievalPlan,
         )
 
-        return ContextRetrievalPlan(
-            mode="dual_primary",
-            steps=[
+        strategy = strategy_payload.get("strategy", "event_primary")
+        if strategy == "dual_primary":
+            steps = [
                 {"source": "event_search", "budget": 1},
                 {"source": "disclosure_search", "budget": 1},
-            ],
+            ]
+        elif strategy == "disclosure_primary":
+            steps = [{"source": "disclosure_search", "budget": 1}]
+        else:
+            steps = [{"source": "event_search", "budget": 1}]
+
+        return ContextRetrievalPlan(
+            mode=strategy,
+            steps=steps,
             allow_local_rag=False,
         )
-
-
-class _StubClassifier:
-    def classify(self, *, query, router_payload, session_topic):
-        del query, router_payload, session_topic
-        return {"strategy": "dual_primary", "confidence": "high", "reason": "test"}
 
 
 class DualSourceExternalContextRetrieverTest(unittest.TestCase):
@@ -130,36 +132,39 @@ class DualSourceExternalContextRetrieverTest(unittest.TestCase):
         )
 
         retriever = DualSourceExternalContextRetriever(
-            classifier=_StubClassifier(),
             planner=_StubPlanner(),
             event_search_provider=_StubEventProvider(
                 ExternalContextResult(
-                    summary_hint="事件背景",
+                    summary_hint="Event background",
                     evidence_refs=["bocha:1"],
-                    supporting_points=["事件点1"],
+                    supporting_points=["Event point"],
                 )
             ),
             disclosure_search_provider=_StubDisclosureProvider(
                 ExternalContextResult(
-                    summary_hint="公告背景",
+                    summary_hint="Disclosure background",
                     evidence_refs=["cninfo:1"],
-                    supporting_points=["公告点1"],
-                    candidate_hints=["中远海能"],
+                    supporting_points=["Disclosure point"],
+                    candidate_hints=["COSCO"],
                 )
             ),
         )
 
         result = retriever.retrieve_event_context(
-            query="红海局势升级利好哪些A股航运股？",
-            event="红海局势升级",
-            themes=["航运"],
+            query="Who benefits from the Red Sea disruption?",
+            event="Red Sea disruption",
+            themes=["shipping"],
             time_scope="recent",
             limit=3,
+            strategy="dual_primary",
         )
 
         self.assertEqual(result["source_status"]["mode"], "dual_primary")
+        self.assertEqual(result["source_status"]["allow_local_rag"], False)
         self.assertEqual(result["evidence_refs"], ["bocha:1", "cninfo:1"])
-        self.assertEqual(result["candidate_hints"], ["中远海能"])
+        self.assertEqual(result["candidate_hints"], ["COSCO"])
+        self.assertIn("Event background", result["summary_hint"])
+        self.assertIn("Disclosure background", result["summary_hint"])
 
     def test_discover_candidates_uses_disclosure_provider_query(self) -> None:
         from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
@@ -170,12 +175,11 @@ class DualSourceExternalContextRetrieverTest(unittest.TestCase):
         )
 
         retriever = DualSourceExternalContextRetriever(
-            classifier=_StubClassifier(),
             planner=_StubPlanner(),
             event_search_provider=_StubEventProvider(ExternalContextResult()),
             disclosure_search_provider=_StubDisclosureProvider(
                 ExternalContextResult(
-                    candidate_hints=["中远海能", "招商轮船"],
+                    candidate_hints=["COSCO", "China Merchants"],
                     evidence_refs=["cninfo:2"],
                     source_status={"cninfo_used": True},
                 )
@@ -183,12 +187,12 @@ class DualSourceExternalContextRetrieverTest(unittest.TestCase):
         )
 
         result = retriever.discover_candidates(
-            query="红海局势升级利好哪些A股航运股？",
-            event_context={"event": "红海局势升级", "themes": ["航运"]},
+            query="Who benefits from the Red Sea disruption?",
+            event_context={"event": "Red Sea disruption", "themes": ["shipping"]},
             limit=1,
         )
 
-        self.assertEqual(result["candidates"], ["中远海能", "招商轮船"])
+        self.assertEqual(result["candidates"], ["COSCO", "China Merchants"])
         self.assertEqual(result["evidence_refs"], ["cninfo:2"])
 
 

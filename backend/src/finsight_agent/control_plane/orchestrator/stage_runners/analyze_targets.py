@@ -39,7 +39,7 @@ def run_analyze_targets_stage(
         session_context=session_context,
     )
 
-    # 候选池不足时只允许补一次候选发现检索，避免 stage 内部无限回路。
+    # Only allow one recovery lookup when the candidate pool is empty.
     if not candidate_pool:
         discovery_payload = external_context_retriever.discover_candidates(
             query=request.query,
@@ -51,7 +51,7 @@ def run_analyze_targets_stage(
         )
 
     if not candidate_pool:
-        message = "当前只能确认事件背景，尚不能可靠识别具体受影响标的。"
+        message = "Only event background is available; affected targets are still unclear."
         return StageExecutionResult(
             stage_name=StageName.ANALYZE_TARGETS.value,
             status="degraded",
@@ -101,11 +101,7 @@ def _build_candidate_pool(
         [
             str(router_entities.get("target") or "").strip(),
             *_normalize_parts(router_entities.get("targets")),
-            *(
-                list(session_context.active_candidates)
-                if session_context is not None
-                else []
-            ),
+            *(list(session_context.active_candidates) if session_context is not None else []),
             *_normalize_parts(event_context.get("candidate_hints")),
         ]
     )
@@ -116,10 +112,10 @@ def _build_user_summary(
     ranked_targets: object,
 ) -> str:
     if target_scope:
-        return f"已完成受影响标的初筛，当前优先关注：{'、'.join(target_scope[:3])}。"
+        return f"Completed target scoping. Current focus: {', '.join(target_scope[:3])}."
     if isinstance(ranked_targets, list) and ranked_targets:
-        return "已完成受影响标的初筛。"
-    return "当前未能形成稳定标的列表。"
+        return "Completed initial affected-target analysis."
+    return "No stable affected-target list was produced."
 
 
 def _read_stage_output(stage_value: object) -> dict[str, object]:

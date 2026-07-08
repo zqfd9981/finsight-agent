@@ -43,7 +43,7 @@ def run_synthesize_report_stage(
     report_blocks = [
         EvidenceOverviewBlock(
             block_type="evidence_overview",
-            title="证据概览",
+            title="Evidence Overview",
             items=[
                 EvidenceOverviewItem(
                     evidence_id=item.evidence_id,
@@ -57,12 +57,12 @@ def run_synthesize_report_stage(
     ]
     uncertainty_notes: list[str] = []
     if not evidence_count and strategy != "event_primary":
-        uncertainty_notes.append("当前尚未检索到足够强的直接证据。")
+        uncertainty_notes.append("No strong direct evidence was retrieved yet.")
     uncertainty_notes.extend(open_questions)
 
-    next_actions = ["可继续追问更具体的公司、时间或主题。"]
+    next_actions = ["Ask for a narrower company, time window, or disclosure angle."]
     if target_scope:
-        next_actions.insert(0, f"可优先补查 {'、'.join(target_scope[:2])} 的直接证据。")
+        next_actions.insert(0, f"Prioritize direct evidence review for {', '.join(target_scope[:2])}.")
 
     final_response = reporting_service.build_report_response(
         session_id=request.session_id or "",
@@ -106,14 +106,14 @@ def run_synthesize_report_stage(
 def _build_summary(*, evidence_count: int, target_scope: list[str]) -> str:
     if target_scope and evidence_count:
         return (
-            f"已围绕 {'、'.join(target_scope[:2])} 检索到 {evidence_count} 条证据，"
-            "可用于继续研判。"
+            f"Retrieved {evidence_count} evidence items for {', '.join(target_scope[:2])}; "
+            "ready for report synthesis."
         )
     if target_scope:
-        return f"已完成初步标的分析，当前优先关注：{'、'.join(target_scope[:3])}。"
+        return f"Completed target scoping with focus on {', '.join(target_scope[:3])}."
     if evidence_count:
-        return f"已检索到 {evidence_count} 条证据，可用于继续研判。"
-    return "暂未检索到相关证据。"
+        return f"Retrieved {evidence_count} evidence items for report synthesis."
+    return "No relevant evidence was retrieved."
 
 
 def _read_stage_output(stage_value: object) -> dict[str, object]:

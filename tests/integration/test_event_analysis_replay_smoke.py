@@ -22,6 +22,7 @@ from tests.integration.test_event_impact_analysis_flow import (
     _StubPlannerService,
     _StubRetrievalFacade,
     _StubRouterService,
+    _StubStrategyClassifier,
     _StubTargetAnalysisService,
 )
 
@@ -35,14 +36,18 @@ class _EvalExternalContextRetriever:
         themes: list[str],
         time_scope: str,
         limit: int,
+        strategy: str,
     ) -> dict[str, object] | None:
         del query, event, themes, time_scope, limit
         return {
-            "summary_hint": "红海局势升级导致绕航和运价上行预期升温。",
-            "supporting_points": ["航线扰动加剧", "航运链景气弹性提升"],
+            "summary_hint": "The disruption increased freight-rate sensitivity.",
+            "supporting_points": [
+                "Detour expectations rose.",
+                "Shipping-chain tightness improved rate elasticity.",
+            ],
             "evidence_refs": ["ext_ctx_001"],
             "source_status": {
-                "mode": "dual_primary",
+                "mode": strategy,
                 "allow_local_rag": False,
             },
         }
@@ -56,7 +61,7 @@ class _EvalExternalContextRetriever:
     ) -> dict[str, object] | None:
         del query, event_context, limit
         return {
-            "candidates": ["中远海能", "招商轮船"],
+            "candidates": ["COSCO", "China Merchants"],
             "evidence_refs": ["ext_candidate_001"],
             "source_status": {"mode": "dual_primary"},
         }
@@ -67,7 +72,7 @@ class EventAnalysisReplaySmokeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture_path = Path(temp_dir) / "cases.jsonl"
             fixture_path.write_text(
-                '{"case_id":"dual_001","query":"红海局势升级利好哪些A股航运股？","expected_intent":"event_impact_analysis","expected_strategy":"dual_primary","allow_degraded":true,"min_target_count":1,"expected_target_keywords":["中远海能"],"notes":"smoke"}\n',
+                '{"case_id":"dual_001","query":"Which A-share shipping stocks benefit from the Red Sea disruption?","expected_intent":"event_impact_analysis","expected_strategy":"dual_primary","allow_degraded":true,"min_target_count":1,"expected_target_keywords":["COSCO"],"notes":"smoke"}\n',
                 encoding="utf-8",
             )
 
@@ -82,6 +87,7 @@ class EventAnalysisReplaySmokeTest(unittest.TestCase):
                 session_service=SessionService(
                     repository=SessionRepository(storage_dir=Path(temp_dir) / "sessions")
                 ),
+                retrieval_strategy_classifier=_StubStrategyClassifier(strategy="dual_primary"),
             )
 
             records = replay_event_cases(fixture_path, service=service)

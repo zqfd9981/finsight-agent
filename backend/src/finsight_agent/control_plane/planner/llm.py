@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from finsight_agent.infra.llm import LlmClient
 from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
@@ -13,6 +11,8 @@ def build_plan_with_llm(
     llm_client: LlmClient,
     system_prompt: str,
     router_result: RouterResult,
+    *,
+    strategy_payload: dict[str, str] | None = None,
 ) -> Plan | None:
     try:
         payload = llm_client.complete_json(
@@ -26,6 +26,7 @@ def build_plan_with_llm(
                     "needs": router_result.needs,
                     "constraints": router_result.constraints,
                 },
+                "strategy_payload": strategy_payload or {},
                 "system_prompt": system_prompt,
             },
         )

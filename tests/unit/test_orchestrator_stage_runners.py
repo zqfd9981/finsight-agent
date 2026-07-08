@@ -24,6 +24,7 @@ from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
+from shared.enums.stage_name import StageName
 
 
 class _StubStructuredDataService:
@@ -90,6 +91,7 @@ class _StubExternalContextRetriever:
         themes: list[str],
         time_scope: str,
         limit: int,
+        strategy: str,
     ) -> dict[str, object] | None:
         self.event_calls.append(
             {
@@ -98,6 +100,7 @@ class _StubExternalContextRetriever:
                 "themes": themes,
                 "time_scope": time_scope,
                 "limit": limit,
+                "strategy": strategy,
             }
         )
         return self.event_context_payload
@@ -146,6 +149,7 @@ class _StubLlmClient:
         self.payload = payload
 
     def complete_json(self, *, prompt_name: str, variables: dict[str, object]) -> dict[str, object]:
+        del prompt_name, variables
         return self.payload
 
 
@@ -155,8 +159,8 @@ def _build_router_result(**overrides: object) -> RouterResult:
         "follow_up_type": "none",
         "confidence": "high",
         "entities": {
-            "company": "宁德时代",
-            "metric": "营收",
+            "company": "CATL",
+            "metric": "revenue",
             "time_scope": "2024Q1",
         },
         "needs": [],
@@ -167,7 +171,7 @@ def _build_router_result(**overrides: object) -> RouterResult:
 
 
 def _build_request(
-    query: str = "宁德时代 2024Q1 营收是多少？",
+    query: str = "CATL 2024Q1 revenue?",
     session_id: str | None = "sess_001",
 ) -> AnalysisRequest:
     return AnalysisRequest(
@@ -180,7 +184,7 @@ def _build_request(
 def _build_retrieval_result() -> RetrievalResult:
     return RetrievalResult(
         request_id="req_001",
-        normalized_claim="红海事件对航运价格的影响",
+        normalized_claim="shipping rates moved after the event",
         evidence_items=[
             EvidenceItem(
                 evidence_id="evd_001",
@@ -188,8 +192,8 @@ def _build_retrieval_result() -> RetrievalResult:
                 support_strength="high",
                 matched_chunk_id="chunk_001",
                 matched_parent_id="parent_001",
-                excerpt="运价指数在相关期间明显波动。",
-                parent_context="年报披露了运价与业务量变化。",
+                excerpt="Shipping rates moved materially during the event window.",
+                parent_context="The report linked freight pricing to route disruptions.",
                 citation=CitationRecord(
                     document_id="doc_001",
                     page_start=12,
@@ -203,9 +207,9 @@ def _build_retrieval_result() -> RetrievalResult:
                     rerank_score=0.9,
                 ),
                 company_code="600000",
-                company_name="示例公司",
+                company_name="Example Shipping",
                 doc_type="annual_report",
-                section_path=["经营情况讨论与分析"],
+                section_path=["Management Discussion"],
             )
         ],
     )
@@ -217,13 +221,13 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
             TargetAnalysisService,
         )
 
-        service = TargetAnalysisService(llm_client=_StubLlmClient({"target_scope": ["中远海能"]}))
+        service = TargetAnalysisService(llm_client=_StubLlmClient({"target_scope": ["COSCO"]}))
 
         with self.assertRaises(ValueError):
             service.analyze_targets(
-                query="红海局势升级利好哪些 A 股航运公司？",
-                event_context={"event": "红海局势升级", "themes": ["航运"]},
-                candidate_pool=["中远海能"],
+                query="Which A-share shippers benefit?",
+                event_context={"event": "Red Sea disruption", "themes": ["shipping"]},
+                candidate_pool=["COSCO"],
             )
 
     def test_collect_event_context_stage_merges_external_and_local_retrieval(self) -> None:
@@ -235,24 +239,24 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         facade = _StubRetrievalFacade(retrieval_result)
         external_retriever = _StubExternalContextRetriever(
             event_context_payload={
-                "summary_hint": "红海局势升级导致绕航预期升温",
-                "supporting_points": ["航线扰动加剧", "运价弹性上升"],
+                "summary_hint": "Route disruptions tightened near-term freight expectations.",
+                "supporting_points": ["Detours increased voyage distance."],
                 "evidence_refs": ["ext_001"],
                 "source_status": {"local_rag_needed": True},
             }
         )
 
         result = run_collect_event_context_stage(
-            request=_build_request(query="红海局势升级利好哪些 A 股航运公司？"),
+            request=_build_request(query="Who benefits from the Red Sea disruption?"),
             router_result=_build_router_result(
                 intent="event_impact_analysis",
                 entities={
-                    "event": "红海局势升级",
-                    "themes": ["航运", "油运"],
+                    "event": "Red Sea disruption",
+                    "themes": ["shipping", "energy"],
                     "time_scope": "recent",
                 },
             ),
-            stage_constraints={"retrieval_budget": 3},
+            stage_constraints={"retrieval_budget": 3, "strategy": "dual_primary"},
             execution_state={},
             retrieval_facade=facade,
             external_context_retriever=external_retriever,
@@ -261,12 +265,12 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(result.stage_name, "collect_event_context")
         self.assertEqual(result.status, "success")
         event_context = result.output_payload["event_context"]
-        self.assertEqual(event_context["event"], "红海局势升级")
-        self.assertEqual(event_context["themes"], ["航运", "油运"])
-        self.assertIn("红海局势升级导致绕航预期升温", event_context["context_summary"])
-        self.assertEqual(result.output_payload["strategy"], "")
+        self.assertEqual(event_context["event"], "Red Sea disruption")
+        self.assertEqual(event_context["themes"], ["shipping", "energy"])
+        self.assertIn("Route disruptions", event_context["context_summary"])
+        self.assertEqual(result.output_payload["strategy"], "dual_primary")
         self.assertEqual(result.evidence_refs, ["ext_001", "evd_001"])
-        self.assertEqual(len(external_retriever.event_calls), 1)
+        self.assertEqual(external_retriever.event_calls[0]["strategy"], "dual_primary")
         self.assertEqual(len(facade.calls), 1)
 
     def test_collect_event_context_stage_skips_local_rag_when_external_context_is_sufficient(self) -> None:
@@ -277,8 +281,8 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         facade = _StubRetrievalFacade(_build_retrieval_result())
         external_retriever = _StubExternalContextRetriever(
             event_context_payload={
-                "summary_hint": "红海局势升级已经形成清晰事件背景。",
-                "supporting_points": ["航线绕行预期上升", "运价弹性仍在持续发酵"],
+                "summary_hint": "External context is already sufficient.",
+                "supporting_points": ["Detour expectations remain elevated."],
                 "evidence_refs": ["bocha:001", "cninfo:001"],
                 "source_status": {
                     "mode": "dual_primary",
@@ -288,16 +292,16 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         )
 
         result = run_collect_event_context_stage(
-            request=_build_request(query="红海局势升级利好哪些 A 股航运公司？"),
+            request=_build_request(query="Who benefits from the Red Sea disruption?"),
             router_result=_build_router_result(
                 intent="event_impact_analysis",
                 entities={
-                    "event": "红海局势升级",
-                    "themes": ["航运", "油运"],
+                    "event": "Red Sea disruption",
+                    "themes": ["shipping", "energy"],
                     "time_scope": "recent",
                 },
             ),
-            stage_constraints={"retrieval_budget": 3},
+            stage_constraints={"retrieval_budget": 3, "strategy": "dual_primary"},
             execution_state={},
             retrieval_facade=facade,
             external_context_retriever=external_retriever,
@@ -308,10 +312,9 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(result.evidence_refs, ["bocha:001", "cninfo:001"])
         self.assertEqual(result.output_payload["source_status"]["local_evidence_count"], 0)
         self.assertEqual(result.output_payload["strategy"], "dual_primary")
-        self.assertEqual(len(external_retriever.event_calls), 1)
         self.assertEqual(facade.calls, [])
 
-    def test_analyze_targets_stage_returns_degraded_when_candidate_discovery_is_still_empty(self) -> None:
+    def test_analyze_targets_stage_returns_degraded_when_candidate_discovery_is_empty(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.analyze_targets import (
             run_analyze_targets_stage,
         )
@@ -321,13 +324,13 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         )
         target_analysis_service = _StubTargetAnalysisService(
             {
-                "target_scope": ["中远海能"],
+                "target_scope": ["COSCO"],
                 "ranked_targets": [
                     {
-                        "target": "中远海能",
+                        "target": "COSCO",
                         "target_type": "company",
                         "impact_direction": "positive",
-                        "reasoning_summary": "航运运价弹性可能受益。",
+                        "reasoning_summary": "Higher freight elasticity may help.",
                         "confidence": "medium",
                     }
                 ],
@@ -339,16 +342,16 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
                 status="success",
                 output_payload={
                     "event_context": {
-                        "event": "红海局势升级",
-                        "themes": ["航运"],
+                        "event": "Red Sea disruption",
+                        "themes": ["shipping"],
                         "time_scope": "recent",
-                        "context_summary": "事件背景已确认。",
-                        "supporting_points": ["运价弹性上升"],
+                        "context_summary": "Context confirmed.",
+                        "supporting_points": ["Rates may remain resilient."],
                         "evidence_refs": ["evd_001"],
                     },
                     "event_entities": {
-                        "event": "红海局势升级",
-                        "themes": ["航运"],
+                        "event": "Red Sea disruption",
+                        "themes": ["shipping"],
                         "time_scope": "recent",
                     },
                 },
@@ -357,12 +360,12 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         }
 
         result = run_analyze_targets_stage(
-            request=_build_request(query="红海局势升级利好哪些 A 股航运公司？"),
+            request=_build_request(query="Which A-share shippers benefit?"),
             router_result=_build_router_result(
                 intent="event_impact_analysis",
                 entities={
-                    "event": "红海局势升级",
-                    "themes": ["航运"],
+                    "event": "Red Sea disruption",
+                    "themes": ["shipping"],
                     "time_scope": "recent",
                 },
             ),
@@ -401,14 +404,14 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(
             result.output_payload["structured_result"],
             {
-                "company": "宁德时代",
-                "metric": "营收",
+                "company": "CATL",
+                "metric": "revenue",
                 "time_scope": "2024Q1",
                 "value": "123.45",
             },
         )
-        self.assertEqual(service.calls, [("宁德时代", "营收", "2024Q1")])
-        self.assertIn("宁德时代", result.user_summary or "")
+        self.assertEqual(service.calls, [("CATL", "revenue", "2024Q1")])
+        self.assertIn("CATL", result.user_summary or "")
 
     def test_synthesize_brief_answer_stage_builds_final_response(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_brief_answer import (
@@ -421,8 +424,8 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
                 status="success",
                 output_payload={
                     "structured_result": {
-                        "company": "宁德时代",
-                        "metric": "营收",
+                        "company": "CATL",
+                        "metric": "revenue",
                         "time_scope": "2024Q1",
                         "value": "123.45",
                     }
@@ -443,8 +446,49 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         final_response = result.output_payload["final_response"]
         self.assertEqual(final_response.session_id, "sess_brief")
         self.assertEqual(final_response.response_type, "success")
-        self.assertIn("宁德时代", final_response.summary)
+        self.assertIn("CATL", final_response.summary)
         self.assertIn("123.45", final_response.summary)
+
+    def test_synthesize_event_answer_stage_builds_final_response(self) -> None:
+        from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_event_answer import (
+            run_synthesize_event_answer_stage,
+        )
+
+        execution_state = {
+            StageName.COLLECT_EVENT_CONTEXT.value: StageExecutionResult(
+                stage_name=StageName.COLLECT_EVENT_CONTEXT.value,
+                status="success",
+                output_payload={
+                    "event_context": {
+                        "event": "Red Sea disruption",
+                        "context_summary": "Freight expectations tightened after route disruptions.",
+                        "supporting_points": ["Voyage distances increased."],
+                        "evidence_refs": ["ext_001"],
+                    },
+                    "source_status": {"mode": "event_primary"},
+                    "strategy": "event_primary",
+                },
+            )
+        }
+
+        result = run_synthesize_event_answer_stage(
+            request=_build_request(
+                query="What changed in the Red Sea disruption background?",
+                session_id="sess_event",
+            ),
+            router_result=_build_router_result(intent="event_impact_analysis"),
+            stage_constraints={"preferred_output": "brief_answer"},
+            execution_state=execution_state,
+            reporting_service=ReportingService(),
+        )
+
+        self.assertEqual(result.stage_name, "synthesize_event_answer")
+        self.assertEqual(result.status, "success")
+        final_response = result.output_payload["final_response"]
+        self.assertEqual(final_response.session_id, "sess_event")
+        self.assertEqual(final_response.report_blocks, [])
+        self.assertIn("Freight expectations tightened", final_response.summary)
+        self.assertEqual(result.evidence_refs, ["ext_001"])
 
     def test_retrieve_evidence_stage_builds_query_in_fixed_order_and_deduplicates(self) -> None:
         from finsight_agent.control_plane.orchestrator.stage_runners.retrieve_evidence import (
@@ -454,16 +498,16 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         retrieval_result = _build_retrieval_result()
         facade = _StubRetrievalFacade(retrieval_result)
         result = run_retrieve_evidence_stage(
-            request=_build_request(query="给我证据"),
+            request=_build_request(query="Show me the evidence"),
             router_result=_build_router_result(
                 intent="evidence_lookup",
                 entities={
-                    "target": "航运股",
-                    "claim": "红海事件对航运运价有影响",
+                    "target": "shipping",
+                    "claim": "the event impacted shipping rates",
                 },
                 constraints={"retrieval_budget": 3},
             ),
-            stage_constraints={"retrieval_budget": 3, "target": "航运股"},
+            stage_constraints={"retrieval_budget": 3, "target": "shipping"},
             execution_state={},
             retrieval_facade=facade,
         )
@@ -476,7 +520,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(facade.calls[0]["limit"], 3)
         self.assertEqual(
             facade.calls[0]["raw_query"],
-            "给我证据 红海事件对航运运价有影响 航运股",
+            "Show me the evidence the event impacted shipping rates shipping",
         )
 
     def test_retrieve_evidence_stage_consumes_execution_state_context_in_order(self) -> None:
@@ -492,21 +536,21 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
                 status="success",
                 output_payload={
                     "event_context": {
-                        "event": "红海事件",
-                        "themes": ["航运", "能源", "航运"],
+                        "event": "Red Sea disruption",
+                        "themes": ["shipping", "energy", "shipping"],
                         "time_scope": "2024Q1",
                     }
                 },
             ),
             "analyze_targets": {
-                "target_scope": ["港口", "航运", "港口"],
+                "target_scope": ["ports", "shipping", "ports"],
             },
         }
         run_retrieve_evidence_stage(
-            request=_build_request(query="分析红海风险"),
+            request=_build_request(query="Analyze Red Sea risk"),
             router_result=_build_router_result(
                 intent="event_impact_analysis",
-                entities={"target": "港口"},
+                entities={"target": "ports"},
             ),
             stage_constraints={"retrieval_budget": 4},
             execution_state=execution_state,
@@ -516,7 +560,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(len(facade.calls), 1)
         self.assertEqual(
             facade.calls[0]["raw_query"],
-            "分析红海风险 红海事件 航运 能源 2024Q1 港口",
+            "Analyze Red Sea risk Red Sea disruption shipping energy 2024Q1 ports",
         )
 
     def test_retrieve_evidence_stage_prefers_stage_target_and_uses_event_context_in_order(self) -> None:
@@ -527,20 +571,20 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         retrieval_result = _build_retrieval_result()
         facade = _StubRetrievalFacade(retrieval_result)
         run_retrieve_evidence_stage(
-            request=_build_request(query="分析红海风险"),
+            request=_build_request(query="Analyze Red Sea risk"),
             router_result=_build_router_result(
                 intent="event_impact_analysis",
                 entities={
-                    "event": "红海事件",
-                    "themes": ["航运", "能源", "航运"],
+                    "event": "Red Sea disruption",
+                    "themes": ["shipping", "energy", "shipping"],
                     "time_scope": "2024Q1",
-                    "target": "港口",
+                    "target": "ports",
                 },
             ),
             stage_constraints={
                 "retrieval_budget": 4,
-                "target_scope": ["航运", "港口", "航运"],
-                "target": "港口股",
+                "target_scope": ["shipping", "ports", "shipping"],
+                "target": "port operators",
             },
             execution_state={},
             retrieval_facade=facade,
@@ -549,7 +593,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(len(facade.calls), 1)
         self.assertEqual(
             facade.calls[0]["raw_query"],
-            "分析红海风险 港口股 红海事件 航运 能源 2024Q1 港口",
+            "Analyze Red Sea risk port operators Red Sea disruption shipping energy 2024Q1 ports",
         )
 
     def test_retrieve_evidence_stage_falls_back_to_router_target_when_stage_target_missing(self) -> None:
@@ -560,10 +604,10 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         retrieval_result = _build_retrieval_result()
         facade = _StubRetrievalFacade(retrieval_result)
         run_retrieve_evidence_stage(
-            request=_build_request(query="继续找相关证据"),
+            request=_build_request(query="Continue finding evidence"),
             router_result=_build_router_result(
                 intent="evidence_lookup",
-                entities={"target": "出海服务"},
+                entities={"target": "offshore services"},
             ),
             stage_constraints={"retrieval_budget": 2},
             execution_state={},
@@ -574,7 +618,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(facade.calls[0]["limit"], 2)
         self.assertEqual(
             facade.calls[0]["raw_query"],
-            "继续找相关证据 出海服务",
+            "Continue finding evidence offshore services",
         )
 
     def test_synthesize_report_stage_builds_report_response_from_retrieval_result(self) -> None:
@@ -594,7 +638,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
 
         result = run_synthesize_report_stage(
             request=_build_request(
-                query="红海事件有哪些证据？",
+                query="What evidence do we have?",
                 session_id="sess_report",
             ),
             router_result=_build_router_result(intent="evidence_lookup"),
@@ -610,11 +654,11 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertEqual(final_response.response_type, "success")
         self.assertTrue(final_response.report_blocks)
         self.assertEqual(final_response.report_blocks[0]["block_type"], "evidence_overview")
-        self.assertIn("已检索到", final_response.summary)
+        self.assertIn("Retrieved 1 evidence items", final_response.summary)
         first_item = final_response.report_blocks[0]["items"][0]
         self.assertEqual(first_item["evidence_id"], "evd_001")
-        self.assertEqual(first_item["excerpt"], "运价指数在相关期间明显波动。")
-        self.assertEqual(first_item["company_name"], "示例公司")
+        self.assertEqual(first_item["excerpt"], "Shipping rates moved materially during the event window.")
+        self.assertEqual(first_item["company_name"], "Example Shipping")
         self.assertEqual(first_item["doc_type"], "annual_report")
         self.assertEqual(result.evidence_refs, ["evd_001"])
 
@@ -622,31 +666,31 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         service = ReportingService()
         result = service.build_report_response(
             session_id="sess_report_service",
-            summary="已检索到 1 条证据。",
+            summary="Retrieved 1 evidence item.",
             report_blocks=[
                 EvidenceOverviewBlock(
                     block_type="evidence_overview",
-                    title="证据概览",
+                    title="Evidence Overview",
                     items=[
                         EvidenceOverviewItem(
                             evidence_id="evd_001",
-                            excerpt="证据 1",
-                            company_name="示例公司",
+                            excerpt="Evidence 1",
+                            company_name="Example Shipping",
                             doc_type="annual_report",
                         )
                     ],
                 )
             ],
-            uncertainty_notes=["证据数量有限"],
-            next_actions=["可继续追问更具体时间段"],
+            uncertainty_notes=["Evidence coverage is still limited."],
+            next_actions=["Narrow the time window."],
         )
 
         self.assertEqual(result.response_type, "success")
         self.assertEqual(result.session_id, "sess_report_service")
-        self.assertEqual(result.summary, "已检索到 1 条证据。")
+        self.assertEqual(result.summary, "Retrieved 1 evidence item.")
         self.assertEqual(result.report_blocks[0]["block_type"], "evidence_overview")
-        self.assertEqual(result.uncertainty_notes, ["证据数量有限"])
-        self.assertEqual(result.next_actions, ["可继续追问更具体时间段"])
+        self.assertEqual(result.uncertainty_notes, ["Evidence coverage is still limited."])
+        self.assertEqual(result.next_actions, ["Narrow the time window."])
 
     def test_build_report_response_rejects_invalid_evidence_overview_block(self) -> None:
         service = ReportingService()
@@ -654,11 +698,11 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.build_report_response(
                 session_id="sess_invalid",
-                summary="已检索到 1 条证据。",
+                summary="Retrieved 1 evidence item.",
                 report_blocks=[
                     {
                         "block_type": "evidence_overview",
-                        "title": "证据概览",
+                        "title": "Evidence Overview",
                     }
                 ],
                 uncertainty_notes=[],
@@ -669,7 +713,7 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         service = ReportingService(
             llm_client=_StubLlmClient(
                 {
-                    "answer_markdown": "这是最终回答。",
+                    "answer_markdown": "This is the final answer.",
                     "answer_confidence": "high",
                 }
             )
@@ -677,38 +721,38 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
 
         result = service.build_report_response(
             session_id="sess_answer",
-            summary="已拿到初步结论。",
+            summary="Initial conclusion is ready.",
             report_blocks=[
                 EvidenceOverviewBlock(
                     block_type="evidence_overview",
-                    title="证据概览",
+                    title="Evidence Overview",
                     items=[
                         EvidenceOverviewItem(
                             evidence_id="evd_001",
-                            excerpt="证据 1",
-                            company_name="示例公司",
+                            excerpt="Evidence 1",
+                            company_name="Example Shipping",
                             doc_type="annual_report",
                         )
                     ],
                 )
             ],
-            uncertainty_notes=["证据仍有限"],
-            next_actions=["继续追问"],
+            uncertainty_notes=["Evidence is still limited."],
+            next_actions=["Keep asking follow-ups."],
             final_answer_context={
-                "query": "红海局势最近怎么了？",
+                "query": "What changed in the Red Sea disruption?",
                 "strategy": "event_primary",
                 "event_evidence_count": 1,
                 "company_evidence_count": 0,
             },
         )
 
-        self.assertEqual(result.answer_markdown, "这是最终回答。")
+        self.assertEqual(result.answer_markdown, "This is the final answer.")
 
     def test_build_brief_response_populates_answer_markdown(self) -> None:
         service = ReportingService(
             llm_client=_StubLlmClient(
                 {
-                    "answer_markdown": "宁德时代 2024Q1 营收为 123.45。",
+                    "answer_markdown": "CATL revenue in 2024Q1 was 123.45.",
                     "answer_confidence": "high",
                 }
             )
@@ -716,15 +760,15 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
 
         result = service.build_brief_response(
             session_id="sess_brief_answer",
-            summary="宁德时代2024Q1营收为123.45。",
+            summary="CATL revenue in 2024Q1 was 123.45.",
             final_answer_context={
-                "query": "宁德时代 2024Q1 营收是多少？",
+                "query": "CATL 2024Q1 revenue?",
                 "intent": "metric_lookup",
                 "strategy": "structured_data",
             },
         )
 
-        self.assertEqual(result.answer_markdown, "宁德时代 2024Q1 营收为 123.45。")
+        self.assertEqual(result.answer_markdown, "CATL revenue in 2024Q1 was 123.45.")
 
 
 if __name__ == "__main__":

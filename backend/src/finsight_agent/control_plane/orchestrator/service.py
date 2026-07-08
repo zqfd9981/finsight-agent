@@ -24,15 +24,13 @@ from .dual_source_context_retriever import DualSourceExternalContextRetriever
 from .models import OrchestrationResult
 from .observation_builder import build_stage_observation
 from .policies import build_guardrail_response, should_short_circuit
-from .retrieval_strategy_classifier import StubRetrievalStrategyClassifier
-from .trained_strategy_classifier import TrainedRetrievalStrategyClassifier
 from .stage_runners import STAGE_RUNNERS
 from .target_analysis import TargetAnalysisService
 from .trace_builder import build_execution_trace_block
 
 
 class OrchestratorService:
-    """首版 orchestrator，只负责按计划调度已注册的阶段 runner。"""
+    """Stage orchestrator."""
 
     def __init__(
         self,
@@ -48,7 +46,9 @@ class OrchestratorService:
         self._reporting_service = reporting_service or ReportingService()
         self._retrieval_facade = retrieval_facade
         self._retrieval_facade_factory = retrieval_facade_factory or build_retrieval_facade
-        self._external_context_retriever = external_context_retriever or _build_default_external_context_retriever()
+        self._external_context_retriever = (
+            external_context_retriever or _build_default_external_context_retriever()
+        )
         self._target_analysis_service = target_analysis_service or TargetAnalysisService()
 
     def execute(
@@ -104,7 +104,11 @@ class OrchestratorService:
                     runner_kwargs["session_context"] = session_context
                     runner_kwargs["external_context_retriever"] = self._external_context_retriever
                     runner_kwargs["target_analysis_service"] = self._target_analysis_service
-                elif stage_name == "synthesize_brief_answer":
+                elif stage_name in {
+                    "synthesize_brief_answer",
+                    "synthesize_event_answer",
+                    "synthesize_report",
+                }:
                     runner_kwargs["reporting_service"] = self._reporting_service
                 elif stage_name == "retrieve_evidence":
                     retrieval_facade, is_owned = self._resolve_retrieval_facade(
@@ -113,8 +117,6 @@ class OrchestratorService:
                     if is_owned and owned_retrieval_facade is None:
                         owned_retrieval_facade = retrieval_facade
                     runner_kwargs["retrieval_facade"] = retrieval_facade
-                elif stage_name == "synthesize_report":
-                    runner_kwargs["reporting_service"] = self._reporting_service
 
                 stage_result = runner(**runner_kwargs)
                 execution_state[stage_name] = stage_result
@@ -154,16 +156,7 @@ class OrchestratorService:
 
 
 def _build_default_external_context_retriever() -> DualSourceExternalContextRetriever:
-    """默认装配免费的双源外部上下文检索链路。
-
-    策略分类器默认注入 ``TrainedRetrievalStrategyClassifier``；模型缺失 / 加载失败 /
-    推理异常时自动回退到 ``StubRetrievalStrategyClassifier``，行为与历史完全一致。
-    """
-
     return DualSourceExternalContextRetriever(
-        classifier=TrainedRetrievalStrategyClassifier(
-            fallback=StubRetrievalStrategyClassifier(),
-        ),
         planner=ContextRetrievalPlanner(),
         event_search_provider=BochaEventSearchProvider(),
         disclosure_search_provider=OfficialDisclosureSearchProvider(),

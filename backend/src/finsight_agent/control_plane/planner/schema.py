@@ -47,6 +47,9 @@ def _validate_stage_dependencies(stages: list[str]) -> None:
             StageName.QUERY_STRUCTURED_DATA.value
         ],
         StageName.ANALYZE_TARGETS.value: [StageName.COLLECT_EVENT_CONTEXT.value],
+        StageName.SYNTHESIZE_EVENT_ANSWER.value: [
+            StageName.COLLECT_EVENT_CONTEXT.value
+        ],
         StageName.SYNTHESIZE_REPORT.value: [StageName.RETRIEVE_EVIDENCE.value],
     }
 
