@@ -9,6 +9,12 @@ from finsight_agent.capabilities.retrieval.service import (
     build_retrieval_facade,
 )
 from finsight_agent.capabilities.structured_data.service import StructuredDataService
+from finsight_agent.shared.utils.execution_events import (
+    EventCallback,
+    RunEventEmitter,
+    bind_active_run_event_emitter,
+    get_active_run_event_emitter,
+)
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
@@ -58,12 +64,15 @@ class OrchestratorService:
         router_result: RouterResult,
         plan: Plan,
         session_context: SessionContext | None,
+        event_callback: EventCallback | None = None,
     ) -> OrchestrationResult:
         result = OrchestrationResult(
             session_id=request.session_id or "sess_stub",
             router_result=router_result,
             plan=plan,
         )
+
+        emitter, owns_binding = self._resolve_event_emitter(event_callback=event_callback)
 
         if should_short_circuit(router_result.intent):
             result.guardrail_response = build_guardrail_response(
@@ -80,67 +89,117 @@ class OrchestratorService:
         execution_state: dict[str, object] = {}
         owned_retrieval_facade: RetrievalFacade | None = None
 
-        try:
-            for stage_name in plan.stages:
-                runner = STAGE_RUNNERS[stage_name]
-                stage_constraints = plan.stage_constraints.get(stage_name, {})
-                runner_kwargs = {
-                    "request": request,
-                    "router_result": router_result,
-                    "execution_state": execution_state,
-                    "stage_constraints": stage_constraints,
-                }
-                if stage_name == "query_structured_data":
-                    runner_kwargs["structured_data_service"] = self._structured_data_service
-                elif stage_name == "collect_event_context":
-                    retrieval_facade, is_owned = self._resolve_retrieval_facade(
-                        cached_facade=owned_retrieval_facade
-                    )
-                    if is_owned and owned_retrieval_facade is None:
-                        owned_retrieval_facade = retrieval_facade
-                    runner_kwargs["retrieval_facade"] = retrieval_facade
-                    runner_kwargs["external_context_retriever"] = self._external_context_retriever
-                elif stage_name == "analyze_targets":
-                    runner_kwargs["session_context"] = session_context
-                    runner_kwargs["external_context_retriever"] = self._external_context_retriever
-                    runner_kwargs["target_analysis_service"] = self._target_analysis_service
-                elif stage_name in {
-                    "synthesize_brief_answer",
-                    "synthesize_event_answer",
-                    "synthesize_report",
-                }:
-                    runner_kwargs["reporting_service"] = self._reporting_service
-                elif stage_name == "retrieve_evidence":
-                    retrieval_facade, is_owned = self._resolve_retrieval_facade(
-                        cached_facade=owned_retrieval_facade
-                    )
-                    if is_owned and owned_retrieval_facade is None:
-                        owned_retrieval_facade = retrieval_facade
-                    runner_kwargs["retrieval_facade"] = retrieval_facade
+        def _run() -> OrchestrationResult:
+            nonlocal owned_retrieval_facade
+            try:
+                for stage_name in plan.stages:
+                    runner = STAGE_RUNNERS[stage_name]
+                    stage_constraints = plan.stage_constraints.get(stage_name, {})
+                    runner_kwargs = {
+                        "request": request,
+                        "router_result": router_result,
+                        "execution_state": execution_state,
+                        "stage_constraints": stage_constraints,
+                    }
+                    if stage_name == "query_structured_data":
+                        runner_kwargs["structured_data_service"] = self._structured_data_service
+                    elif stage_name == "collect_event_context":
+                        retrieval_facade, is_owned = self._resolve_retrieval_facade(
+                            cached_facade=owned_retrieval_facade
+                        )
+                        if is_owned and owned_retrieval_facade is None:
+                            owned_retrieval_facade = retrieval_facade
+                        runner_kwargs["retrieval_facade"] = retrieval_facade
+                        runner_kwargs[
+                            "external_context_retriever"
+                        ] = self._external_context_retriever
+                    elif stage_name == "analyze_targets":
+                        runner_kwargs["session_context"] = session_context
+                        runner_kwargs[
+                            "external_context_retriever"
+                        ] = self._external_context_retriever
+                        runner_kwargs[
+                            "target_analysis_service"
+                        ] = self._target_analysis_service
+                    elif stage_name in {
+                        "synthesize_brief_answer",
+                        "synthesize_event_answer",
+                        "synthesize_report",
+                    }:
+                        runner_kwargs["reporting_service"] = self._reporting_service
+                    elif stage_name == "retrieve_evidence":
+                        retrieval_facade, is_owned = self._resolve_retrieval_facade(
+                            cached_facade=owned_retrieval_facade
+                        )
+                        if is_owned and owned_retrieval_facade is None:
+                            owned_retrieval_facade = retrieval_facade
+                        runner_kwargs["retrieval_facade"] = retrieval_facade
 
-                stage_result = runner(**runner_kwargs)
-                execution_state[stage_name] = stage_result
-                result.stage_observations.append(
-                    build_stage_observation(
-                        observation_id=f"obs_{uuid.uuid4().hex[:8]}",
-                        input_summary={
-                            "query": request.query,
-                            "intent": router_result.intent,
-                            "stage_constraints": stage_constraints,
-                        },
-                        stage_result=stage_result,
+                    stage_started_at = None
+                    if emitter is not None:
+                        stage_started_at = emitter.emit_stage_started(
+                            stage_name=stage_name,
+                            message=f"{stage_name} started",
+                        )
+                    try:
+                        stage_result = runner(**runner_kwargs)
+                    except Exception as exc:
+                        if emitter is not None:
+                            emitter.emit_error(
+                                stage_name=stage_name,
+                                message=f"{stage_name} failed: {exc}",
+                                started_at=stage_started_at,
+                            )
+                        raise
+
+                    execution_state[stage_name] = stage_result
+                    result.stage_observations.append(
+                        build_stage_observation(
+                            observation_id=f"obs_{uuid.uuid4().hex[:8]}",
+                            input_summary={
+                                "query": request.query,
+                                "intent": router_result.intent,
+                                "stage_constraints": stage_constraints,
+                            },
+                            stage_result=stage_result,
+                        )
                     )
-                )
 
-                final_response = stage_result.output_payload.get("final_response")
-                if final_response is not None:
-                    result.final_response = final_response
-        finally:
-            if owned_retrieval_facade is not None:
-                owned_retrieval_facade.close()
+                    if emitter is not None:
+                        emitter.emit_stage_finished(
+                            stage_name=stage_name,
+                            status=str(stage_result.status or "success"),
+                            message=_build_stage_message(stage_result),
+                            started_at=stage_started_at,
+                            payload=_build_stage_payload(stage_result),
+                        )
 
-        result.trace_blocks.append(build_execution_trace_block(result))
-        return result
+                    final_response = stage_result.output_payload.get("final_response")
+                    if final_response is not None:
+                        result.final_response = final_response
+            finally:
+                if owned_retrieval_facade is not None:
+                    owned_retrieval_facade.close()
+
+            result.trace_blocks.append(build_execution_trace_block(result))
+            return result
+
+        if owns_binding:
+            with bind_active_run_event_emitter(emitter):
+                return _run()
+        return _run()
+
+    def _resolve_event_emitter(
+        self,
+        *,
+        event_callback: EventCallback | None,
+    ) -> tuple[RunEventEmitter | None, bool]:
+        active = get_active_run_event_emitter()
+        if active is not None:
+            return active, False
+        if event_callback is None:
+            return None, False
+        return RunEventEmitter(run_id="run_stub", event_callback=event_callback), True
 
     def _resolve_retrieval_facade(
         self,
@@ -161,3 +220,22 @@ def _build_default_external_context_retriever() -> DualSourceExternalContextRetr
         event_search_provider=BochaEventSearchProvider(),
         disclosure_search_provider=OfficialDisclosureSearchProvider(),
     )
+
+
+def _build_stage_message(stage_result) -> str:
+    if stage_result.degraded_reason:
+        return stage_result.degraded_reason
+    if stage_result.user_summary:
+        return stage_result.user_summary
+    return f"{stage_result.stage_name} finished"
+
+
+def _build_stage_payload(stage_result) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "evidence_ref_count": len(stage_result.evidence_refs),
+    }
+    if stage_result.degraded_reason:
+        payload["degraded_reason"] = stage_result.degraded_reason
+    if "final_response" in stage_result.output_payload:
+        payload["has_final_response"] = True
+    return payload

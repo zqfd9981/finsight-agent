@@ -16,7 +16,10 @@ for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from backend.apps.api.analysis_turns import ANALYSIS_TURNS_PATH  # noqa: E402
+from backend.apps.api.analysis_turns import (  # noqa: E402
+    ANALYSIS_TURNS_PATH,
+    ANALYSIS_TURNS_STREAM_PATH,
+)
 from backend.apps.api.event_eval import EVENT_CASES_PATH, EVENT_REPLAY_PATH  # noqa: E402
 
 
@@ -27,8 +30,65 @@ class BackendApiAppTest(unittest.TestCase):
         app = build_app()
         paths = {route.path for route in app.routes if hasattr(route, "path")}
         self.assertIn(ANALYSIS_TURNS_PATH, paths)
+        self.assertIn(ANALYSIS_TURNS_STREAM_PATH, paths)
         self.assertIn(EVENT_CASES_PATH, paths)
         self.assertIn(EVENT_REPLAY_PATH, paths)
+
+    def test_post_analysis_turns_stream_returns_sse_events(self) -> None:
+        from backend.apps.api import app_factory
+        from backend.apps.api.app_factory import build_app
+        from shared.contracts.analysis_stream_event import AnalysisStreamEvent
+
+        def _fake_stream_handler(request):
+            del request
+            yield AnalysisStreamEvent(
+                event_type="run_started",
+                run_id="run_001",
+                stage_name="",
+                status="running",
+                message="Analysis started",
+                started_at="2026-07-08T00:00:00Z",
+            )
+            yield AnalysisStreamEvent(
+                event_type="run_finished",
+                run_id="run_001",
+                stage_name="",
+                status="success",
+                message="Final response ready",
+                started_at="2026-07-08T00:00:00Z",
+                finished_at="2026-07-08T00:00:01Z",
+                duration_ms=1000,
+                final_response={"response_type": "success", "summary": "ok"},
+                payload={"response_envelope": {"session_id": "sess_001"}},
+            )
+
+        original_handler = getattr(app_factory, "handle_analysis_turn_stream", None)
+        app_factory.handle_analysis_turn_stream = _fake_stream_handler
+        try:
+            client = TestClient(build_app())
+            with client.stream(
+                "POST",
+                ANALYSIS_TURNS_STREAM_PATH,
+                json={
+                    "version": "v1",
+                    "query": "红海局势影响哪些航运股？",
+                    "query_mode": "first_turn",
+                    "session_id": None,
+                    "include_trace": True,
+                    "notes": None,
+                },
+            ) as resp:
+                body = "".join(chunk for chunk in resp.iter_text())
+        finally:
+            if original_handler is None:
+                delattr(app_factory, "handle_analysis_turn_stream")
+            else:
+                app_factory.handle_analysis_turn_stream = original_handler
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/event-stream", resp.headers["content-type"])
+        self.assertIn('"event_type":"run_started"', body)
+        self.assertIn('"event_type":"run_finished"', body)
 
     def test_post_analysis_turns_returns_envelope(self) -> None:
         from backend.apps.api.app_factory import build_app

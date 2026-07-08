@@ -7,6 +7,7 @@ from finsight_agent.capabilities.rerank import (
     RerankCandidate,
     build_default_reranker,
 )
+from finsight_agent.shared.utils.execution_events import emit_nested_stage
 from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
     ExternalContextItem,
     ExternalContextResult,
@@ -238,12 +239,21 @@ class DualSourceExternalContextRetriever(ExternalContextRetriever):
             )
             for index, item in enumerate(filtered_items)
         ]
-        rerank_results = self._reranker.rerank(
-            query=query,
-            profile="external_news",
-            candidates=candidates,
-            top_n=limit,
-        )
+        with emit_nested_stage(
+            stage_name="rerank",
+            start_message="Rerank started",
+            finish_message="Rerank finished",
+            payload={
+                "candidate_count": len(candidates),
+                "backend": getattr(self._reranker, "backend_name", "custom_reranker"),
+            },
+        ):
+            rerank_results = self._reranker.rerank(
+                query=query,
+                profile="external_news",
+                candidates=candidates,
+                top_n=limit,
+            )
         score_map = {
             str(result["id"]) if isinstance(result, dict) else result.id: result
             for result in rerank_results

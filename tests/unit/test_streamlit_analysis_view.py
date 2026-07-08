@@ -14,8 +14,9 @@ for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
 
 from frontend.streamlit_app.pages.analysis_view import (
     build_analysis_view_model,
-    build_pseudo_stream_timeline,
+    build_stream_timeline_view,
 )
+from shared.contracts.analysis_stream_event import AnalysisStreamEvent
 from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
 from shared.contracts.final_response import FinalResponse
 from shared.contracts.trace_block import TraceBlock
@@ -85,16 +86,50 @@ class StreamlitAnalysisViewTest(unittest.TestCase):
         self.assertEqual(model["uncertainty_notes"], ["证据数量有限"])
         self.assertEqual(model["next_actions"], ["可继续追问更具体时间段。"])
 
-    def test_build_pseudo_stream_timeline_advances_stage_statuses(self) -> None:
-        initial = build_pseudo_stream_timeline(0.1)
-        mid = build_pseudo_stream_timeline(1.5)
-        late = build_pseudo_stream_timeline(5.0)
+    def test_build_stream_timeline_view_tracks_running_and_completed_stages(self) -> None:
+        view = build_stream_timeline_view(
+            [
+                AnalysisStreamEvent(
+                    event_type="run_started",
+                    run_id="run_001",
+                    stage_name="",
+                    status="running",
+                    message="Analysis started",
+                    started_at="2026-07-08T00:00:00Z",
+                ),
+                AnalysisStreamEvent(
+                    event_type="stage_started",
+                    run_id="run_001",
+                    stage_name="routing",
+                    status="running",
+                    message="Routing started",
+                    started_at="2026-07-08T00:00:00Z",
+                ),
+                AnalysisStreamEvent(
+                    event_type="stage_finished",
+                    run_id="run_001",
+                    stage_name="routing",
+                    status="success",
+                    message="Routing finished",
+                    started_at="2026-07-08T00:00:00Z",
+                    finished_at="2026-07-08T00:00:10Z",
+                    duration_ms=10,
+                ),
+                AnalysisStreamEvent(
+                    event_type="stage_started",
+                    run_id="run_001",
+                    stage_name="planning",
+                    status="running",
+                    message="Planning started",
+                    started_at="2026-07-08T00:00:10Z",
+                ),
+            ]
+        )
 
-        self.assertEqual(initial[0]["status"], "running")
-        self.assertEqual(initial[1]["status"], "pending")
-        self.assertEqual(mid[0]["status"], "completed")
-        self.assertEqual(mid[1]["status"], "running")
-        self.assertEqual(late[-1]["status"], "running")
+        self.assertEqual(view["current_stage"], "planning")
+        self.assertEqual(view["completed_count"], 1)
+        self.assertEqual(view["stages"][0]["status"], "success")
+        self.assertEqual(view["stages"][1]["status"], "running")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from finsight_agent.control_plane.session.service import SessionService
 from finsight_agent.workbench_backend_api.service import WorkbenchBackendApiService
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
+from shared.contracts.analysis_stream_event import AnalysisStreamEvent
 from shared.contracts.final_response import FinalResponse
 from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
@@ -88,11 +89,23 @@ class StubOrchestratorService:
         router_result: RouterResult,
         plan: Plan,
         session_context: SessionContext | None,
+        event_callback=None,
     ):
         from finsight_agent.control_plane.orchestrator.models import OrchestrationResult
 
         del session_context
         if router_result.intent == "evidence_lookup":
+            if event_callback is not None:
+                event_callback(
+                    AnalysisStreamEvent(
+                        event_type="stage_started",
+                        run_id="run_stub",
+                        stage_name="retrieve_evidence",
+                        status="running",
+                        message="Retrieve evidence started",
+                        started_at="2026-07-08T00:00:00Z",
+                    )
+                )
             response = FinalResponse(
                 response_type="success",
                 session_id=request.session_id or "",
@@ -128,6 +141,19 @@ class StubOrchestratorService:
                     },
                 )()
             )
+            if event_callback is not None:
+                event_callback(
+                    AnalysisStreamEvent(
+                        event_type="stage_finished",
+                        run_id="run_stub",
+                        stage_name="retrieve_evidence",
+                        status="success",
+                        message="Retrieve evidence finished",
+                        started_at="2026-07-08T00:00:00Z",
+                        finished_at="2026-07-08T00:00:01Z",
+                        duration_ms=1000,
+                    )
+                )
             return result
 
         return OrchestrationResult(
@@ -307,6 +333,32 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
 
         self.assertEqual(envelope.session_id, "sess_missing")
         self.assertIsNone(router_service.last_session_context)
+
+    def test_stream_response_events_emits_run_lifecycle_and_final_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = SessionRepository(storage_dir=temp_dir)
+            session_service = SessionService(repository=repository)
+            service = WorkbenchBackendApiService(
+                router_service=RecordingRouterService(),
+                planner_service=StubPlannerService(),
+                orchestrator_service=StubOrchestratorService(),
+                session_service=session_service,
+            )
+
+            events = list(
+                service.stream_response_events(
+                    AnalysisRequest(query="Expand the evidence for COSCO.")
+                )
+            )
+
+        self.assertEqual(events[0].event_type, "run_started")
+        self.assertEqual(events[1].stage_name, "routing")
+        self.assertEqual(events[2].stage_name, "routing")
+        self.assertEqual(events[3].stage_name, "planning")
+        self.assertEqual(events[4].stage_name, "planning")
+        self.assertEqual(events[-1].event_type, "run_finished")
+        self.assertEqual(events[-1].final_response["response_type"], "success")
+        self.assertIn("response_envelope", events[-1].payload)
 
 
 if __name__ == "__main__":
