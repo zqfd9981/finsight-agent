@@ -82,18 +82,22 @@ class ContextRetrievalModelsTest(unittest.TestCase):
 class _StubEventProvider:
     def __init__(self, result) -> None:
         self.result = result
+        self.calls = 0
 
     def search_event_context(self, **kwargs):
         del kwargs
+        self.calls += 1
         return self.result
 
 
 class _StubDisclosureProvider:
     def __init__(self, result) -> None:
         self.result = result
+        self.calls = 0
 
     def search(self, **kwargs):
         del kwargs
+        self.calls += 1
         return self.result
 
 
@@ -123,6 +127,91 @@ class _StubPlanner:
 
 
 class DualSourceExternalContextRetrieverTest(unittest.TestCase):
+    def test_event_primary_retrieve_event_context_uses_event_source_only(self) -> None:
+        from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
+            ExternalContextResult,
+        )
+        from finsight_agent.control_plane.orchestrator.dual_source_context_retriever import (
+            DualSourceExternalContextRetriever,
+        )
+
+        event_provider = _StubEventProvider(
+            ExternalContextResult(
+                summary_hint="Event background",
+                evidence_refs=["bocha:1"],
+                supporting_points=["Event point"],
+            )
+        )
+        disclosure_provider = _StubDisclosureProvider(
+            ExternalContextResult(
+                summary_hint="Disclosure background",
+                evidence_refs=["cninfo:1"],
+                supporting_points=["Disclosure point"],
+            )
+        )
+
+        retriever = DualSourceExternalContextRetriever(
+            planner=_StubPlanner(),
+            event_search_provider=event_provider,
+            disclosure_search_provider=disclosure_provider,
+        )
+
+        result = retriever.retrieve_event_context(
+            query="What happened in the Red Sea disruption?",
+            event="Red Sea disruption",
+            themes=["shipping"],
+            time_scope="recent",
+            limit=3,
+            strategy="event_primary",
+        )
+
+        self.assertEqual(event_provider.calls, 1)
+        self.assertEqual(disclosure_provider.calls, 0)
+        self.assertEqual(result["summary_hint"], "Event background")
+        self.assertEqual(result["evidence_refs"], ["bocha:1"])
+
+    def test_disclosure_primary_retrieve_event_context_uses_disclosure_source_only(self) -> None:
+        from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
+            ExternalContextResult,
+        )
+        from finsight_agent.control_plane.orchestrator.dual_source_context_retriever import (
+            DualSourceExternalContextRetriever,
+        )
+
+        event_provider = _StubEventProvider(
+            ExternalContextResult(
+                summary_hint="Event background",
+                evidence_refs=["bocha:1"],
+            )
+        )
+        disclosure_provider = _StubDisclosureProvider(
+            ExternalContextResult(
+                summary_hint="Disclosure background",
+                evidence_refs=["cninfo:1"],
+                supporting_points=["Disclosure point"],
+            )
+        )
+
+        retriever = DualSourceExternalContextRetriever(
+            planner=_StubPlanner(),
+            event_search_provider=event_provider,
+            disclosure_search_provider=disclosure_provider,
+        )
+
+        result = retriever.retrieve_event_context(
+            query="What does CATL's expansion disclosure imply?",
+            event="CATL expansion disclosure",
+            themes=["battery"],
+            time_scope="recent",
+            limit=3,
+            strategy="disclosure_primary",
+        )
+
+        self.assertEqual(event_provider.calls, 0)
+        self.assertEqual(disclosure_provider.calls, 1)
+        self.assertEqual(result["summary_hint"], "Disclosure background")
+        self.assertEqual(result["evidence_refs"], ["cninfo:1"])
+
     def test_retrieve_event_context_merges_planned_sources(self) -> None:
         from finsight_agent.control_plane.orchestrator.context_retrieval_models import (
             ExternalContextResult,

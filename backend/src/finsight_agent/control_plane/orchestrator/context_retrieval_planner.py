@@ -23,10 +23,7 @@ class ContextRetrievalPlanner:
         if strategy == "disclosure_primary":
             return ContextRetrievalPlan(
                 mode="disclosure_primary",
-                steps=[
-                    {"source": "disclosure_search", "budget": 1},
-                    {"source": "event_search", "budget": 1, "when": "if_weak"},
-                ],
+                steps=[{"source": "disclosure_search", "budget": 1}],
                 allow_local_rag=False,
             )
         if strategy == "dual_primary":
@@ -40,9 +37,6 @@ class ContextRetrievalPlanner:
             )
         return ContextRetrievalPlan(
             mode="event_primary",
-            steps=[
-                {"source": "event_search", "budget": 1},
-                {"source": "disclosure_search", "budget": 1, "when": "if_weak"},
-            ],
+            steps=[{"source": "event_search", "budget": 1}],
             allow_local_rag=False,
         )

@@ -14,7 +14,7 @@ for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
 
 
 class ContextRetrievalPlannerTest(unittest.TestCase):
-    def test_event_primary_plan_prefers_event_search_then_conditional_disclosure(self) -> None:
+    def test_event_primary_plan_uses_event_search_only(self) -> None:
         from finsight_agent.control_plane.orchestrator.context_retrieval_planner import (
             ContextRetrievalPlanner,
         )
@@ -30,8 +30,34 @@ class ContextRetrievalPlannerTest(unittest.TestCase):
         )
 
         self.assertEqual(plan.mode, "event_primary")
-        self.assertEqual(plan.steps[0]["source"], "event_search")
-        self.assertEqual(plan.steps[1]["source"], "disclosure_search")
+        self.assertEqual(
+            [step["source"] for step in plan.steps],
+            ["event_search"],
+        )
+        self.assertFalse(any("when" in step for step in plan.steps))
+        self.assertFalse(plan.allow_local_rag)
+
+    def test_disclosure_primary_plan_uses_disclosure_search_only(self) -> None:
+        from finsight_agent.control_plane.orchestrator.context_retrieval_planner import (
+            ContextRetrievalPlanner,
+        )
+
+        planner = ContextRetrievalPlanner()
+
+        plan = planner.build_plan(
+            strategy_payload={"strategy": "disclosure_primary", "confidence": "medium"},
+            router_payload={
+                "intent": "event_impact_analysis",
+                "entities": {"event": "宁德时代扩产公告", "themes": ["锂电"]},
+            },
+        )
+
+        self.assertEqual(plan.mode, "disclosure_primary")
+        self.assertEqual(
+            [step["source"] for step in plan.steps],
+            ["disclosure_search"],
+        )
+        self.assertFalse(any("when" in step for step in plan.steps))
         self.assertFalse(plan.allow_local_rag)
 
     def test_dual_primary_plan_uses_two_primary_sources_without_default_rag(self) -> None:
