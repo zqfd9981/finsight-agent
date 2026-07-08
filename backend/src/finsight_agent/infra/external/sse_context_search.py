@@ -57,6 +57,7 @@ class SseContextSearchProvider:
                     publish_date=str(raw.get("SSEDATE") or "").strip(),
                     url=url,
                     snippet=title,
+                    evidence_ref=f"sse:{bulletin_id}",
                     company_names=[],
                     company_codes=[code] if code else [],
                     themes=[],

@@ -51,6 +51,7 @@ class CninfoContextSearchProvider:
                     publish_date=record.publish_date,
                     url=record.pdf_url,
                     snippet=record.title,
+                    evidence_ref=f"cninfo:{record.announcement_id or index}",
                     company_names=[record.company_name],
                     company_codes=[record.company_code],
                     themes=[],

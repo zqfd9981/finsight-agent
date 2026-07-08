@@ -123,9 +123,7 @@ class BochaEventSearchProvider:
             items=items,
             summary_hint=items[0].title if items else "",
             supporting_points=[(item.snippet or item.title) for item in items[:2]],
-            evidence_refs=[
-                f"bocha:item_{idx:03d}" for idx in range(1, len(items) + 1)
-            ],
+            evidence_refs=[item.evidence_ref for item in items if item.evidence_ref],
             candidate_hints=list(themes),
             source_status={
                 "bocha_used": True,
@@ -137,7 +135,7 @@ class BochaEventSearchProvider:
     @staticmethod
     def _map_items(value_list: list[dict[str, object]], themes: list[str]) -> list[ExternalContextItem]:
         items: list[ExternalContextItem] = []
-        for entry in value_list:
+        for index, entry in enumerate(value_list, start=1):
             title = str(entry.get("name") or "").strip()
             url = str(entry.get("url") or "").strip()
             publish_date = str(entry.get("datePublished") or "").strip()
@@ -154,6 +152,7 @@ class BochaEventSearchProvider:
                     publish_date=publish_date,
                     url=url,
                     snippet=snippet,
+                    evidence_ref=f"bocha:item_{index:03d}",
                     themes=list(themes),
                 )
             )

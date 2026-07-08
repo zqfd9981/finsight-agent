@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from finsight_agent.capabilities.rerank import (
+    RerankCandidate,
+    build_default_reranker,
+)
+
 from .models import FusedHit, RerankedHit
 
 
@@ -7,16 +14,53 @@ def rerank_hits(
     hits: list[FusedHit],
     query_text: str,
     top_n: int = 20,
+    reranker=None,
 ) -> list[RerankedHit]:
-    """对融合后的 top N child chunks 做轻量精排。"""
+    """Rerank fused hits with a shared lightweight reranker."""
 
     normalized_query = query_text.strip()
     if not normalized_query:
         return []
 
+    resolved_reranker = reranker or build_default_reranker()
+    truncated_hits = hits[:top_n]
+    candidates = [
+        RerankCandidate(
+            id=str(index),
+            title=" ".join(
+                part
+                for part in (
+                    hit.company_name,
+                    hit.doc_type,
+                    " / ".join(hit.section_path[:2]),
+                )
+                if part
+            ).strip(),
+            text=hit.chunk_text,
+            metadata={
+                "company_code": hit.company_code,
+                "company_name": hit.company_name,
+                "doc_type": hit.doc_type,
+                "publish_date": hit.publish_date,
+            },
+        )
+        for index, hit in enumerate(truncated_hits)
+    ]
+    ranked_scores = resolved_reranker.rerank(
+        query=normalized_query,
+        profile="local_rag",
+        candidates=candidates,
+        top_n=top_n,
+    )
+    score_map = {
+        str(result["id"]) if isinstance(result, Mapping) else result.id: result
+        for result in ranked_scores
+    }
+
     reranked: list[RerankedHit] = []
-    for hit in hits[:top_n]:
-        score = _compute_overlap_score(normalized_query, hit.chunk_text)
+    for index, hit in enumerate(truncated_hits):
+        score_entry = score_map.get(str(index))
+        score = _read_score(score_entry)
         reranked.append(
             RerankedHit(
                 chunk_id=hit.chunk_id,
@@ -48,12 +92,9 @@ def rerank_hits(
     )
 
 
-def _compute_overlap_score(query_text: str, chunk_text: str) -> float:
-    """用字符集合重叠做首版轻量 rerank 分数。"""
-
-    query_chars = {character for character in query_text if not character.isspace()}
-    if not query_chars:
+def _read_score(score_entry: object) -> float:
+    if score_entry is None:
         return 0.0
-    chunk_chars = {character for character in chunk_text if not character.isspace()}
-    overlap = query_chars & chunk_chars
-    return len(overlap) / len(query_chars)
+    if isinstance(score_entry, Mapping):
+        return float(score_entry.get("score") or 0.0)
+    return float(getattr(score_entry, "score", 0.0))
