@@ -35,6 +35,26 @@ class _StubCninfoContextFetcher:
         }
 
 
+class _RecordingCninfoContextFetcher:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def get_json(
+        self,
+        url: str,
+        params: dict[str, object],
+        headers: dict[str, str],
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "url": url,
+                "params": dict(params),
+                "headers": dict(headers),
+            }
+        )
+        return {"announcements": []}
+
+
 class _StubSseContextFetcher:
     def get_json(
         self,
@@ -71,6 +91,23 @@ class CninfoContextSearchProviderTest(unittest.TestCase):
         self.assertEqual(len(result.items), 1)
         self.assertEqual(result.items[0].source, "cninfo")
         self.assertEqual(result.items[0].company_codes, ["000001"])
+
+    def test_search_does_not_put_raw_chinese_query_into_referer_header(self) -> None:
+        from finsight_agent.infra.external.cninfo_context_search import (
+            CninfoContextSearchProvider,
+        )
+
+        fetcher = _RecordingCninfoContextFetcher()
+        provider = CninfoContextSearchProvider(fetcher=fetcher)
+        query = "宁德时代扩产公告意味着什么？"
+
+        provider.search(query=query, limit=3)
+
+        self.assertEqual(len(fetcher.calls), 1)
+        headers = fetcher.calls[0]["headers"]
+        assert isinstance(headers, dict)
+        self.assertIn("Referer", headers)
+        self.assertNotIn(query, str(headers["Referer"]))
 
 
 class SseContextSearchProviderTest(unittest.TestCase):

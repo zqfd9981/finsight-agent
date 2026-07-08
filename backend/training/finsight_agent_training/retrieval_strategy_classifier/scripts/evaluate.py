@@ -77,12 +77,6 @@ def _predict_labels(
         for row in rows:
             text = build_input_text(
                 query=str(row.get("query", "")),
-                intent=str(row.get("intent", "")),
-                event=str(row.get("event", "") or ""),
-                themes=list(row.get("themes", []) or []),
-                target=str(row.get("target", "") or ""),
-                time_scope=str(row.get("time_scope", "") or ""),
-                session_topic=str(row.get("session_topic", "") or ""),
             )
             inputs = tokenizer(text, truncation=True, max_length=128, return_tensors="pt")
             logits = model(**inputs).logits

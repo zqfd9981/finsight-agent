@@ -6,6 +6,31 @@ from frontend.streamlit_app.state.workbench_state import get_last_analysis_resul
 from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
 
 
+def _normalize_response_payload(
+    envelope: AnalysisResponseEnvelope,
+) -> dict[str, object]:
+    response = envelope.response
+    summary = str(getattr(response, "summary", "") or "").strip()
+    if not summary:
+        summary = str(getattr(response, "partial_answer", "") or "").strip()
+    return {
+        "response_type": str(getattr(response, "response_type", "") or "").strip(),
+        "summary": summary,
+        "answer_markdown": str(getattr(response, "answer_markdown", "") or "").strip(),
+        "report_blocks": list(getattr(response, "report_blocks", []) or []),
+        "uncertainty_notes": list(getattr(response, "uncertainty_notes", []) or []),
+        "next_actions": list(
+            getattr(response, "next_actions", None)
+            or getattr(response, "suggested_next_actions", [])
+            or []
+        ),
+        "reason_code": str(getattr(response, "reason_code", "") or "").strip(),
+        "progress_state": str(getattr(response, "progress_state", "") or "").strip(),
+        "trace_refs": list(getattr(response, "trace_refs", []) or []),
+        "notes": getattr(response, "notes", None),
+    }
+
+
 def build_debug_view_model(envelope: AnalysisResponseEnvelope) -> dict[str, object]:
     routing: dict[str, object] = {}
     planning: dict[str, object] = {}
@@ -23,20 +48,21 @@ def build_debug_view_model(envelope: AnalysisResponseEnvelope) -> dict[str, obje
         "planning": planning,
         "execution": execution,
         "stages": stages,
-        "response_type": envelope.response.response_type,
+        "response_type": str(getattr(envelope.response, "response_type", "") or ""),
+        "final_response": _normalize_response_payload(envelope),
     }
 
 
 def render_debug_view() -> None:
-    """调试视图渲染壳：分开展示 Routing / Planning / Execution + 阶段列表。"""
-
     st.subheader("调试视图")
     envelope = get_last_analysis_result(st.session_state)
     if envelope is None:
-        st.info("请先在「分析视图」运行一次分析。")
+        st.info("请先在“分析视图”运行一次分析。")
         return
 
     model = build_debug_view_model(envelope)
+    with st.expander("Final Response", expanded=True):
+        st.json(model["final_response"])
     with st.expander("Routing", expanded=True):
         st.json(model["routing"])
     with st.expander("Planning", expanded=False):

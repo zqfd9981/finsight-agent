@@ -9,23 +9,38 @@ import yaml
 
 @dataclass(slots=True)
 class PromptSettings:
-    """控制面 prompt 文件路径配置。"""
+    """Control-plane prompt file path configuration."""
 
     router_system_prompt_path: Path
     planner_system_prompt_path: Path
 
 
 @dataclass(slots=True)
+class ReportingPromptSettings:
+    """Reporting prompt file path configuration."""
+
+    final_answer_writer_system_prompt_path: Path
+
+
+@dataclass(slots=True)
 class ControlPlaneSettings:
-    """控制面相关配置。"""
+    """Control-plane related settings."""
 
     root: Path
     prompts: PromptSettings
 
 
 @dataclass(slots=True)
+class ReportingSettings:
+    """Reporting related settings."""
+
+    root: Path
+    prompts: ReportingPromptSettings
+
+
+@dataclass(slots=True)
 class DenseSettings:
-    """Dense retrieval 的本地向量检索配置。"""
+    """Dense retrieval local vector-search settings."""
 
     qdrant_collection_name: str
     embedding_model_name: str
@@ -35,7 +50,7 @@ class DenseSettings:
 
 @dataclass(slots=True)
 class RetrievalSettings:
-    """本地 PDF 语料采集与检索相关配置。"""
+    """Local PDF corpus and retrieval settings."""
 
     manifest_path: Path
     raw_filings_root: Path
@@ -52,14 +67,15 @@ class RetrievalSettings:
 
 @dataclass(slots=True)
 class AppSettings:
-    """应用顶层配置对象。"""
+    """Top-level application settings object."""
 
     control_plane: ControlPlaneSettings
+    reporting: ReportingSettings
     retrieval: RetrievalSettings
 
 
 def load_settings() -> AppSettings:
-    """从仓库级 app.yaml 读取并解析当前应用配置。"""
+    """Read application settings from the repository-level app.yaml."""
 
     repo_root = Path(__file__).resolve().parents[4]
     config_path = repo_root / "config" / "app.yaml"
@@ -67,10 +83,20 @@ def load_settings() -> AppSettings:
     root_config = _require_mapping(raw_config, "root")
     app_config = _require_mapping(root_config.get("app"), "app")
     control_plane_config = _require_mapping(app_config.get("control_plane"), "app.control_plane")
+    reporting_config = _require_mapping(app_config.get("reporting"), "app.reporting")
     retrieval_config = _require_mapping(app_config.get("retrieval"), "app.retrieval")
     dense_config = _require_mapping(retrieval_config.get("dense"), "app.retrieval.dense")
+
     control_plane_root = _resolve_path(repo_root, _require_text(control_plane_config, "root"))
-    prompts_config = _require_mapping(control_plane_config.get("prompts"), "app.control_plane.prompts")
+    control_plane_prompts = _require_mapping(
+        control_plane_config.get("prompts"),
+        "app.control_plane.prompts",
+    )
+    reporting_root = _resolve_path(repo_root, _require_text(reporting_config, "root"))
+    reporting_prompts = _require_mapping(
+        reporting_config.get("prompts"),
+        "app.reporting.prompts",
+    )
 
     return AppSettings(
         control_plane=ControlPlaneSettings(
@@ -78,11 +104,23 @@ def load_settings() -> AppSettings:
             prompts=PromptSettings(
                 router_system_prompt_path=_resolve_path(
                     control_plane_root,
-                    _require_text(prompts_config, "router_system_prompt_path"),
+                    _require_text(control_plane_prompts, "router_system_prompt_path"),
                 ),
                 planner_system_prompt_path=_resolve_path(
                     control_plane_root,
-                    _require_text(prompts_config, "planner_system_prompt_path"),
+                    _require_text(control_plane_prompts, "planner_system_prompt_path"),
+                ),
+            ),
+        ),
+        reporting=ReportingSettings(
+            root=reporting_root,
+            prompts=ReportingPromptSettings(
+                final_answer_writer_system_prompt_path=_resolve_path(
+                    reporting_root,
+                    _require_text(
+                        reporting_prompts,
+                        "final_answer_writer_system_prompt_path",
+                    ),
                 ),
             ),
         ),
@@ -91,7 +129,10 @@ def load_settings() -> AppSettings:
             raw_filings_root=_resolve_path(repo_root, _require_text(retrieval_config, "raw_filings_root")),
             parsed_filings_root=_resolve_path(repo_root, _require_text(retrieval_config, "parsed_filings_root")),
             chunked_filings_root=_resolve_path(repo_root, _require_text(retrieval_config, "chunked_filings_root")),
-            retrieval_index_root=_resolve_path(repo_root, _require_text(retrieval_config, "retrieval_index_root")),
+            retrieval_index_root=_resolve_path(
+                repo_root,
+                _require_text(retrieval_config, "retrieval_index_root"),
+            ),
             status_root=_resolve_path(repo_root, _require_text(retrieval_config, "status_root")),
             dense=DenseSettings(
                 qdrant_collection_name=_require_text(dense_config, "qdrant_collection_name"),
@@ -99,7 +140,10 @@ def load_settings() -> AppSettings:
                 embedding_model_version=_require_text(dense_config, "embedding_model_version"),
                 qdrant_path=_resolve_path(repo_root, _require_text(dense_config, "qdrant_path")),
             ),
-            default_pilot_company_count=_require_int(retrieval_config, "default_pilot_company_count"),
+            default_pilot_company_count=_require_int(
+                retrieval_config,
+                "default_pilot_company_count",
+            ),
             primary_parser_name=_require_text(retrieval_config, "primary_parser_name"),
             parent_target_chars=_require_int(retrieval_config, "parent_target_chars"),
             child_target_chars=_require_int(retrieval_config, "child_target_chars"),
@@ -108,7 +152,7 @@ def load_settings() -> AppSettings:
 
 
 def _require_mapping(value: Any, path: str) -> dict[str, Any]:
-    """确保配置节点是对象结构。"""
+    """Ensure a config node is an object."""
 
     if not isinstance(value, dict):
         raise ValueError(f"{path} must be an object")
@@ -116,7 +160,7 @@ def _require_mapping(value: Any, path: str) -> dict[str, Any]:
 
 
 def _require_text(mapping: dict[str, Any], key: str) -> str:
-    """确保配置项是非空字符串。"""
+    """Ensure a config value is a non-empty string."""
 
     value = mapping.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -125,7 +169,7 @@ def _require_text(mapping: dict[str, Any], key: str) -> str:
 
 
 def _require_int(mapping: dict[str, Any], key: str) -> int:
-    """确保配置项是整数。"""
+    """Ensure a config value is an integer."""
 
     value = mapping.get(key)
     if not isinstance(value, int):
@@ -134,6 +178,6 @@ def _require_int(mapping: dict[str, Any], key: str) -> int:
 
 
 def _resolve_path(base_path: Path, relative_path: str) -> Path:
-    """把配置中的相对路径解析成绝对路径。"""
+    """Resolve a relative path from config into an absolute path."""
 
     return (base_path / relative_path).resolve()

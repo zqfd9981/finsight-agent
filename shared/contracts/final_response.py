@@ -13,6 +13,7 @@ class FinalResponse:
     response_type: str = "degraded"
     session_id: str = ""
     summary: str = ""
+    answer_markdown: str = ""
     report_blocks: list[ReportBlock] = field(default_factory=list)
     uncertainty_notes: list[str] = field(default_factory=list)
     next_actions: list[str] = field(default_factory=list)

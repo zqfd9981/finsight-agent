@@ -16,6 +16,30 @@ from frontend.streamlit_app.api_client import WorkbenchApiClient
 
 
 class StreamlitApiClientTest(unittest.TestCase):
+    def test_parse_response_ignores_unknown_response_fields(self) -> None:
+        client = WorkbenchApiClient()
+
+        payload = {
+            "version": "v1",
+            "session_id": "sess_extra",
+            "turn_id": "turn_stub",
+            "response": {
+                "response_type": "success",
+                "session_id": "sess_extra",
+                "summary": "ok",
+                "answer_markdown": "这是完整回答。",
+                "report_blocks": [],
+                "unexpected_field": "should be ignored",
+            },
+            "trace_blocks": [],
+            "notes": None,
+        }
+
+        envelope = client.parse_response(payload)
+
+        self.assertEqual(envelope.session_id, "sess_extra")
+        self.assertEqual(envelope.response.answer_markdown, "这是完整回答。")
+
     def test_parse_event_cases_returns_view_models(self) -> None:
         client = WorkbenchApiClient()
 
@@ -99,6 +123,7 @@ class WorkbenchApiClientHttpTest(unittest.TestCase):
                 "response_type": "success",
                 "session_id": "sess_x",
                 "summary": "ok",
+                "answer_markdown": "这是完整回答。",
                 "report_blocks": [],
             },
             "trace_blocks": [],
@@ -120,6 +145,7 @@ class WorkbenchApiClientHttpTest(unittest.TestCase):
         self.assertEqual(called_url, "http://10.0.0.5:9000/api/v1/analysis/turns")
         self.assertIsInstance(envelope, AnalysisResponseEnvelope)
         self.assertEqual(envelope.session_id, "sess_x")
+        self.assertEqual(envelope.response.answer_markdown, "这是完整回答。")
 
     def test_send_request_raises_on_non_2xx(self) -> None:
         from unittest.mock import MagicMock, patch

@@ -33,7 +33,7 @@ class CninfoContextSearchProvider:
                 "type": "",
             },
             headers={
-                "Referer": f"{CNINFO_SITE_BASE_URL}/new/fulltextSearch?keyWord={query}",
+                "Referer": f"{CNINFO_SITE_BASE_URL}/new/fulltextSearch",
                 "User-Agent": "Mozilla/5.0",
                 "Accept": "application/json, text/plain, */*",
             },

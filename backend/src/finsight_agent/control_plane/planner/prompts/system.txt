@@ -120,6 +120,19 @@
   - compare 往往偏向目标分析或证据对比
   - redirect 往往意味着重新围绕新主题规划
 
+对 V1 来说，以下是优先采用的标准计划模板：
+
+- metric_lookup
+  - stages 必须是 [query_structured_data, synthesize_brief_answer]
+- event_impact_analysis
+  - stages 必须是 [collect_event_context, analyze_targets, retrieve_evidence, synthesize_report]
+- evidence_lookup
+  - stages 必须是 [retrieve_evidence, synthesize_report]
+- out_of_scope
+  - stages 必须是 []
+
+不要为了“更短”而省略这些模板中的必需 stage。
+
 ## 5. 非法组合与边界约束
 
 以下约束必须遵守：
@@ -127,12 +140,12 @@
 - out_of_scope 时，stages 必须为空数组 []
 - stage 名称必须来自允许的枚举
 - 不要让 stage 顺序违反依赖关系
-  - synthesize_brief_answer 不应出现在 query_structured_data 之前
-  - analyze_targets 不应出现在 collect_event_context 之前，除非输入已经足够明确且不需要事件背景
-  - synthesize_report 不应出现在 retrieve_evidence 之前，除非该计划本身不需要证据阶段
+  - 只要出现 synthesize_brief_answer，就必须同时出现 query_structured_data，且后者排在前面
+  - 只要出现 analyze_targets，就必须同时出现 collect_event_context，且后者排在前面
+  - 只要出现 synthesize_report 且任务需要证据链，就必须同时出现 retrieve_evidence，且后者排在前面
 - 如果 stages 为空，stage_constraints 仍必须是对象
 - 不要生成与 intent 明显无关的 stage
-  - 例如纯 metric_lookup 通常不应包含 collect_event_context
+  - 例如纯 metric_lookup 不应包含 collect_event_context
   - 例如 out_of_scope 不应包含任何执行 stage
 
 如果输入信息不足以支持复杂规划，优先输出更保守、更短的合法计划，而不是虚构不存在的分析步骤。
@@ -153,6 +166,7 @@
 ### stages
 - 根据 intent、needs、entities、constraints 和 follow_up_type 联合判断
 - 选择“足以完成任务”的最小 stage 集合
+- 当 intent 已经明显匹配标准模板时，直接输出对应模板，不要自行改写 stage 组合
 
 ### stage_constraints
 - 只为实际出现的 stage 填约束

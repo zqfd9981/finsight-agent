@@ -19,9 +19,22 @@ from shared.contracts.trace_block import TraceBlock
 
 
 class StreamlitDebugViewTest(unittest.TestCase):
-    def test_build_debug_view_model_groups_trace_blocks(self) -> None:
+    def test_build_debug_view_model_groups_trace_blocks_and_response(self) -> None:
         envelope = AnalysisResponseEnvelope(
-            response=FinalResponse(response_type="success", summary="ok"),
+            response=FinalResponse(
+                response_type="success",
+                summary="ok",
+                answer_markdown="完整回答正文",
+                report_blocks=[
+                    {
+                        "block_type": "evidence_overview",
+                        "title": "关键证据",
+                        "items": [],
+                    }
+                ],
+                uncertainty_notes=["证据有限"],
+                next_actions=["继续追问"],
+            ),
             trace_blocks=[
                 TraceBlock(
                     block_type="routing",
@@ -71,6 +84,10 @@ class StreamlitDebugViewTest(unittest.TestCase):
             model["execution"]["stage_statuses"]["analyze_targets"], "degraded"
         )
         self.assertEqual(model["stages"][1]["stage_name"], "analyze_targets")
+        self.assertEqual(model["final_response"]["summary"], "ok")
+        self.assertEqual(model["final_response"]["answer_markdown"], "完整回答正文")
+        self.assertEqual(model["final_response"]["report_blocks"][0]["title"], "关键证据")
+        self.assertEqual(model["final_response"]["uncertainty_notes"], ["证据有限"])
 
 
 if __name__ == "__main__":

@@ -94,6 +94,7 @@ class StructuredDataService:
             response_type=ResponseType.SUCCESS.value,
             session_id=session_id,
             summary=summary,
+            answer_markdown=summary,
         )
 
     def _to_stage_payload(self, result: MetricLookupResult) -> dict[str, object]:

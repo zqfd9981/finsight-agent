@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from typing import Any
 
 import requests
@@ -138,10 +138,20 @@ class WorkbenchApiClient:
 
         if response_type in {"guardrail", "error"}:
             response: FinalResponse | GuardrailOrErrorResponse = (
-                GuardrailOrErrorResponse(**response_payload)
+                GuardrailOrErrorResponse(
+                    **_filter_dataclass_payload(
+                        GuardrailOrErrorResponse,
+                        response_payload,
+                    )
+                )
             )
         else:
-            response = FinalResponse(**response_payload)
+            response = FinalResponse(
+                **_filter_dataclass_payload(
+                    FinalResponse,
+                    response_payload,
+                )
+            )
 
         return AnalysisResponseEnvelope(
             version=payload.get("version", "v1"),
@@ -201,3 +211,8 @@ class WorkbenchApiClient:
             ),
             records=records,
         )
+
+
+def _filter_dataclass_payload(dataclass_type: type, payload: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = {field.name for field in fields(dataclass_type)}
+    return {key: value for key, value in payload.items() if key in allowed_fields}

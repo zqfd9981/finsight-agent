@@ -283,7 +283,7 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
         self.assertEqual(result.intent, Intent.METRIC_LOOKUP.value)
         self.assertEqual(result.entities["company"], "宁德时代")
 
-    def test_planner_prefers_llm_plan_when_available(self) -> None:
+    def test_planner_falls_back_when_llm_plan_changes_intent(self) -> None:
         llm_payload = {
             "plan_id": "plan_from_llm",
             "intent": Intent.EVIDENCE_LOOKUP.value,
@@ -310,8 +310,14 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
             )
         )
 
-        self.assertEqual(plan.plan_id, "plan_from_llm")
-        self.assertEqual(plan.intent, Intent.EVIDENCE_LOOKUP.value)
+        self.assertEqual(plan.intent, Intent.METRIC_LOOKUP.value)
+        self.assertEqual(
+            plan.stages,
+            [
+                StageName.QUERY_STRUCTURED_DATA.value,
+                StageName.SYNTHESIZE_BRIEF_ANSWER.value,
+            ],
+        )
 
     def test_planner_falls_back_when_llm_plan_is_invalid(self) -> None:
         planner = PlannerService(llm_client=FakeLlmClient([{"intent": "bad"}]))
@@ -322,6 +328,141 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
                 follow_up_type=FollowUpType.NONE.value,
                 confidence="high",
                 entities={"company": "宁德时代", "metric": "net_profit", "time_scope": "2024_annual"},
+                needs=["structured_data_query"],
+                constraints={"preferred_output": "brief_answer"},
+            )
+        )
+
+        self.assertEqual(plan.intent, Intent.METRIC_LOOKUP.value)
+        self.assertEqual(
+            plan.stages,
+            [
+                StageName.QUERY_STRUCTURED_DATA.value,
+                StageName.SYNTHESIZE_BRIEF_ANSWER.value,
+            ],
+        )
+
+    def test_planner_falls_back_when_llm_plan_changes_stage_shape(self) -> None:
+        llm_payload = {
+            "plan_id": "plan_from_llm",
+            "intent": Intent.EVENT_IMPACT_ANALYSIS.value,
+            "stages": [
+                StageName.COLLECT_EVENT_CONTEXT.value,
+                StageName.RETRIEVE_EVIDENCE.value,
+                StageName.SYNTHESIZE_REPORT.value,
+            ],
+            "stage_constraints": {
+                StageName.COLLECT_EVENT_CONTEXT.value: {
+                    "time_hint": "recent",
+                    "retrieval_budget": 2,
+                },
+                StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 2},
+                StageName.SYNTHESIZE_REPORT.value: {"preferred_output": "report"},
+            },
+            "response_mode": ResponseMode.REPORT.value,
+        }
+        planner = PlannerService(llm_client=FakeLlmClient([llm_payload]))
+
+        plan = planner.build_plan(
+            RouterResult(
+                intent=Intent.EVENT_IMPACT_ANALYSIS.value,
+                follow_up_type=FollowUpType.NONE.value,
+                confidence="high",
+                entities={
+                    "event": "red sea disruption",
+                    "themes": ["shipping"],
+                    "time_scope": "recent",
+                },
+                needs=["news_search", "concept_mapping", "rag_retrieval"],
+                constraints={"time_hint": "recent", "preferred_output": "report"},
+            )
+        )
+
+        self.assertEqual(plan.intent, Intent.EVENT_IMPACT_ANALYSIS.value)
+        self.assertEqual(
+            plan.stages,
+            [
+                StageName.COLLECT_EVENT_CONTEXT.value,
+                StageName.ANALYZE_TARGETS.value,
+                StageName.RETRIEVE_EVIDENCE.value,
+                StageName.SYNTHESIZE_REPORT.value,
+            ],
+        )
+
+    def test_planner_accepts_safe_llm_constraints_when_stage_shape_matches(self) -> None:
+        llm_payload = {
+            "plan_id": "plan_from_llm",
+            "intent": Intent.EVENT_IMPACT_ANALYSIS.value,
+            "stages": [
+                StageName.COLLECT_EVENT_CONTEXT.value,
+                StageName.ANALYZE_TARGETS.value,
+                StageName.RETRIEVE_EVIDENCE.value,
+                StageName.SYNTHESIZE_REPORT.value,
+            ],
+            "stage_constraints": {
+                StageName.COLLECT_EVENT_CONTEXT.value: {
+                    "time_hint": "recent",
+                    "retrieval_budget": 2,
+                },
+                StageName.ANALYZE_TARGETS.value: {
+                    "target_scope": ["shipping", "ports"],
+                },
+                StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 2},
+                StageName.SYNTHESIZE_REPORT.value: {"preferred_output": "report"},
+            },
+            "response_mode": ResponseMode.REPORT.value,
+        }
+        planner = PlannerService(llm_client=FakeLlmClient([llm_payload]))
+
+        plan = planner.build_plan(
+            RouterResult(
+                intent=Intent.EVENT_IMPACT_ANALYSIS.value,
+                follow_up_type=FollowUpType.NONE.value,
+                confidence="high",
+                entities={
+                    "event": "red sea disruption",
+                    "themes": ["shipping"],
+                    "time_scope": "recent",
+                },
+                needs=["news_search", "concept_mapping", "rag_retrieval"],
+                constraints={"time_hint": "recent", "preferred_output": "report"},
+            )
+        )
+
+        self.assertEqual(plan.plan_id, "plan_from_llm")
+        self.assertEqual(
+            plan.stage_constraints["collect_event_context"]["retrieval_budget"],
+            2,
+        )
+        self.assertEqual(
+            plan.stage_constraints["analyze_targets"]["target_scope"],
+            ["shipping", "ports"],
+        )
+
+    def test_planner_falls_back_when_llm_plan_skips_required_metric_stage(self) -> None:
+        llm_payload = {
+            "plan_id": "plan_from_llm",
+            "intent": Intent.METRIC_LOOKUP.value,
+            "stages": [StageName.SYNTHESIZE_BRIEF_ANSWER.value],
+            "stage_constraints": {
+                StageName.SYNTHESIZE_BRIEF_ANSWER.value: {
+                    "preferred_output": "brief_answer",
+                }
+            },
+            "response_mode": ResponseMode.BRIEF_ANSWER.value,
+        }
+        planner = PlannerService(llm_client=FakeLlmClient([llm_payload]))
+
+        plan = planner.build_plan(
+            RouterResult(
+                intent=Intent.METRIC_LOOKUP.value,
+                follow_up_type=FollowUpType.NONE.value,
+                confidence="high",
+                entities={
+                    "company": "瀹佸痉鏃朵唬",
+                    "metric": "net_profit",
+                    "time_scope": "2024_annual",
+                },
                 needs=["structured_data_query"],
                 constraints={"preferred_output": "brief_answer"},
             )

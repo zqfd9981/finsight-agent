@@ -45,11 +45,19 @@ class StubStructuredDataService:
 
 
 class StubReportingService:
-    def build_brief_response(self, session_id: str, summary: str) -> FinalResponse:
+    def build_brief_response(
+        self,
+        session_id: str,
+        summary: str,
+        *,
+        final_answer_context: dict[str, object] | None = None,
+    ) -> FinalResponse:
+        del final_answer_context
         return FinalResponse(
             response_type="success",
             session_id=session_id,
             summary=summary,
+            answer_markdown=summary,
         )
 
     def build_report_response(
@@ -59,11 +67,15 @@ class StubReportingService:
         report_blocks: list[dict[str, object]],
         uncertainty_notes: list[str],
         next_actions: list[str],
+        *,
+        final_answer_context: dict[str, object] | None = None,
     ) -> FinalResponse:
+        del final_answer_context
         return FinalResponse(
             response_type="success",
             session_id=session_id,
             summary=summary,
+            answer_markdown=summary,
             report_blocks=report_blocks,
             uncertainty_notes=uncertainty_notes,
             next_actions=next_actions,

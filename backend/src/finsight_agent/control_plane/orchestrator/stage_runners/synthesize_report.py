@@ -18,18 +18,26 @@ def run_synthesize_report_stage(
     execution_state: dict[str, StageExecutionResult],
     reporting_service: ReportingService,
 ) -> StageExecutionResult:
-    del router_result, stage_constraints
+    del stage_constraints
 
     retrieve_result = execution_state[StageName.RETRIEVE_EVIDENCE.value]
     analyze_targets_result = execution_state.get(StageName.ANALYZE_TARGETS.value)
+    collect_context_result = execution_state.get(StageName.COLLECT_EVENT_CONTEXT.value)
+
     retrieval_result = retrieve_result.output_payload.get("retrieval_result")
     if not isinstance(retrieval_result, RetrievalResult):
-        raise TypeError("retrieve_evidence 阶段缺少 retrieval_result")
+        raise TypeError("retrieve_evidence stage missing retrieval_result")
 
     analyze_targets_payload = _read_stage_output(analyze_targets_result)
+    collect_context_payload = _read_stage_output(collect_context_result)
+    event_context = dict(collect_context_payload.get("event_context", {}) or {})
+    source_status = dict(collect_context_payload.get("source_status", {}) or {})
+    strategy = str(collect_context_payload.get("strategy") or source_status.get("mode") or "").strip()
+
     target_scope = _normalize_parts(analyze_targets_payload.get("target_scope"))
     open_questions = _normalize_parts(analyze_targets_payload.get("open_questions"))
     evidence_count = len(retrieval_result.evidence_items)
+    event_evidence_count = len(_normalize_parts(event_context.get("evidence_refs")))
     summary = _build_summary(evidence_count=evidence_count, target_scope=target_scope)
 
     report_blocks = [
@@ -47,20 +55,43 @@ def run_synthesize_report_stage(
             ],
         )
     ]
-    uncertainty_notes = []
-    if not evidence_count:
+    uncertainty_notes: list[str] = []
+    if not evidence_count and strategy != "event_primary":
         uncertainty_notes.append("当前尚未检索到足够强的直接证据。")
     uncertainty_notes.extend(open_questions)
 
     next_actions = ["可继续追问更具体的公司、时间或主题。"]
     if target_scope:
         next_actions.insert(0, f"可优先补查 {'、'.join(target_scope[:2])} 的直接证据。")
+
     final_response = reporting_service.build_report_response(
         session_id=request.session_id or "",
         summary=summary,
         report_blocks=report_blocks,
         uncertainty_notes=uncertainty_notes,
         next_actions=next_actions,
+        final_answer_context={
+            "query": request.query,
+            "intent": router_result.intent,
+            "strategy": strategy,
+            "event_summary": str(event_context.get("context_summary") or "").strip(),
+            "supporting_points": list(event_context.get("supporting_points") or []),
+            "target_scope": target_scope,
+            "event_evidence_refs": list(event_context.get("evidence_refs") or []),
+            "event_evidence_count": event_evidence_count,
+            "company_evidence_count": evidence_count,
+            "evidence_items": [
+                {
+                    "evidence_id": item.evidence_id,
+                    "excerpt": item.excerpt,
+                    "company_name": item.company_name,
+                    "doc_type": item.doc_type,
+                }
+                for item in retrieval_result.evidence_items
+            ],
+            "uncertainty_notes": uncertainty_notes,
+            "next_actions": next_actions,
+        },
     )
 
     return StageExecutionResult(

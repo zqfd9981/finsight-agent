@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinSight Agent · 项目结构关系图</title>
+<style>
+:root {
+  --bg-1: #f6f1e8;
+  --bg-2: #efe6d8;
+  --bg-3: #f8f4ed;
+  --paper: rgba(255, 251, 245, 0.97);
+  --card: #fffdfa;
+  --ink: #1f2937;
+  --ink-2: #4b5563;
+  --muted: #5b6472;
+  --line: #d6c8af;
+  --line-soft: #e7dcc6;
+  --shadow: 0 22px 52px rgba(99, 73, 29, 0.12);
+  --shadow-sm: 0 4px 14px rgba(99, 73, 29, 0.08);
+
+  /* categorical — validated 6-hue palette, all-pairs CVD ΔE ≥ 12 on light surface */
+  --gold:    #b45309;  /* backend */
+  --blue:    #1d4ed8;  /* frontend */
+  --teal:    #0d9488;  /* shared */
+  --green:   #15803d;  /* tests */
+  --redbrn:  #9a3412;  /* docs + openspec (shape-distinguished) */
+  --rose:    #be185d;  /* eval */
+
+  /* soft tints for node fills */
+  --gold-soft:   #f6e8cf;
+  --blue-soft:   #e3ebfd;
+  --teal-soft:   #d8efe9;
+  --green-soft:  #dceadc;
+  --redbrn-soft: #f7e3d4;
+  --rose-soft:   #f7dce6;
+
+  /* edge colors mirror categorical slots */
+  --edge-imports:   #8a7d68;
+  --edge-calls:     #b45309;
+  --edge-impl:      #0d9488;
+  --edge-tests:     #15803d;
+  --edge-docsfor:   #1d4ed8;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top right, rgba(180, 83, 9, 0.14), transparent 26%),
+    radial-gradient(circle at bottom left, rgba(13, 148, 136, 0.08), transparent 28%),
+    linear-gradient(135deg, #f7f1e7 0%, #efe6d8 45%, #f8f4ed 100%);
+}
+
+.masthead {
+  padding: 28px 36px 18px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+}
+.masthead h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+}
+.masthead .subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.masthead .stamp {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+  letter-spacing: 0.5px;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 18px 36px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--line-soft);
+}
+.summary .card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-sm);
+}
+.summary .card .label {
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.summary .card .body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.summary .card.gold .label   { color: var(--gold); }
+.summary .card.blue .label   { color: var(--blue); }
+.summary .card.teal .label   { color: var(--teal); }
+.summary .card.green .label  { color: var(--green); }
+.summary .card.redbrn .label { color: var(--redbrn); }
+.summary .card.rose .label   { color: var(--rose); }
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 0;
+  height: calc(100vh - 240px);
+  min-height: 540px;
+}
+
+.canvas-wrap {
+  position: relative;
+  background:
+    radial-gradient(circle at 25% 30%, rgba(180, 83, 9, 0.04), transparent 40%),
+    radial-gradient(circle at 75% 70%, rgba(13, 148, 136, 0.04), transparent 40%),
+    var(--paper);
+  overflow: hidden;
+}
+svg.canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+svg.canvas:active { cursor: grabbing; }
+
+.controls {
+  position: absolute;
+  top: 12px; left: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+.btn {
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn:hover { background: var(--bg-3); border-color: var(--ink-2); }
+.btn.active {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #fffdfa;
+}
+.btn .dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--ink);
+  max-width: 320px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transition: opacity 0.12s;
+  z-index: 10;
+}
+.tooltip.show { opacity: 1; }
+.tooltip .ttl { font-weight: 600; margin-bottom: 4px; color: var(--ink); }
+.tooltip .meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; line-height: 1.5; word-break: break-all; }
+.tooltip .badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-right: 4px;
+  background: var(--bg-3);
+  color: var(--ink-2);
+  letter-spacing: 0.4px;
+}
+
+.sidebar {
+  background: var(--card);
+  border-left: 1px solid var(--line);
+  padding: 16px 18px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.sidebar h3 {
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+.sidebar h3:not(:first-child) { margin-top: 22px; }
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+.filter-row:hover { background: var(--bg-3); }
+.filter-row .swatch {
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.filter-row .count { color: var(--muted); font-size: 11px; margin-left: auto; }
+.filter-row.off { opacity: 0.4; }
+.filter-row input { display: none; }
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.legend-row .swatch {
+  width: 18px; height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.legend-row .shape {
+  width: 18px; height: 12px;
+  flex-shrink: 0;
+}
+
+.detail-panel {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 360px;
+  max-height: 50%;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  overflow-y: auto;
+  z-index: 5;
+  display: none;
+}
+.detail-panel.show { display: block; }
+.detail-panel .head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.detail-panel .head .ttl { font-size: 14px; font-weight: 600; color: var(--ink); flex: 1; }
+.detail-panel .head .close {
+  cursor: pointer;
+  color: var(--muted);
+  background: none;
+  border: none;
+  font-size: 16px;
+  font-family: inherit;
+  padding: 0 4px;
+}
+.detail-panel .head .close:hover { color: var(--ink); }
+.detail-panel .meta { color: var(--muted); font-size: 11px; margin-bottom: 10px; line-height: 1.6; word-break: break-all; }
+.detail-panel .section { margin-bottom: 10px; }
+.detail-panel .section .lab {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.detail-panel .edge-list { font-size: 11px; color: var(--ink-2); line-height: 1.7; }
+.detail-panel .edge-list .arrow { color: var(--muted); margin: 0 4px; }
+
+.footer {
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  padding: 10px 36px;
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.footer .legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.footer .legend .item { display: flex; align-items: center; gap: 5px; }
+.footer .legend .swatch { width: 18px; height: 4px; border-radius: 2px; }
+
+/* node kind badges (small text inside node) */
+.kind-tag {
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  fill: var(--muted);
+  text-anchor: middle;
+  text-transform: uppercase;
+  font-weight: 600;
+  pointer-events: none;
+}
+.node-label {
+  font-size: 11px;
+  fill: var(--ink);
+  text-anchor: middle;
+  pointer-events: none;
+  font-weight: 500;
+}
+
+/* edge styles */
+.edge { stroke-opacity: 0.55; }
+.edge.imports  { stroke: var(--edge-imports); stroke-width: 1; fill: none; }
+.edge.calls_api{ stroke: var(--edge-calls);   stroke-width: 2.4; fill: none; }
+.edge.implements { stroke: var(--edge-impl);   stroke-width: 1.6; fill: none; stroke-dasharray: none; }
+.edge.tests    { stroke: var(--edge-tests);   stroke-width: 1.2; fill: none; stroke-dasharray: 4 3; }
+.edge.docs_for { stroke: var(--edge-docsfor); stroke-width: 1.2; fill: none; stroke-dasharray: 1 3; }
+
+.edge.dim { stroke-opacity: 0.08; }
+.node.dim { opacity: 0.18; }
+
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .canvas-wrap { height: 60vh; min-height: 420px; }
+  .sidebar { border-left: none; border-top: 1px solid var(--line); }
+}
+</style>
+</head>
+<body data-palette="#b45309,#1d4ed8,#0d9488,#15803d,#9a3412,#be185d" data-mode="light" data-pairs="all">
+
+<header class="masthead">
+  <h1>FinSight Agent · 项目结构关系图</h1>
+  <p class="subtitle">A 股事件影响分析多模块智能体系统：FastAPI 风格骨架入口 + Streamlit 工作台 + 共享 dataclass 契约；已闭环 control plane / retrieval / structured data / reporting / event_eval 五条主链。</p>
+  <div class="stamp">仅供可视化参考，不修改任何源码；图谱数据生成于 2026-07-05</div>
+</header>
+
+<section class="summary">
+  <div class="card gold"><div class="label">① 工程层 ↔ 实现层</div><div class="body">frontend / shared / backend 三层 + 后端内部 control_plane / capabilities / infra / config / evaluation 五层；依赖方向仅 frontend→shared→backend 与 backend→shared，单向无回边。</div></div>
+  <div class="card teal"><div class="label">② shared/contracts 是中枢</div><div class="body">11 个契约 + 6 个枚举被前后端、控制面、能力层、评测模块共同消费；中心度极高，可作图谱枢纽。</div></div>
+  <div class="card rose"><div class="label">③ event_eval 评测子模块</div><div class="body">路径 backend/src/finsight_agent/evaluation/event_eval/：models + checks(6) + fixture_loader + replay + fixtures 五件套；replay 复用 WorkbenchBackendApiService 跑真实链路回放。</div></div>
+  <div class="card green"><div class="label">④ stage runners 数据驱动</div><div class="body">6 个 run_*_stage 函数 + STAGE_RUNNERS 字典调度，由 OrchestratorService 编排，对图谱非常友好。</div></div>
+  <div class="card redbrn"><div class="label">⑤ spec 覆盖度全闭环</div><div class="body">11 个 spec 全部能找到实现 + 单测 + 集成测；唯一无代码落点的是 parallel-delivery-governance（纯治理规范）。</div></div>
+</section>
+
+<div class="layout">
+  <div class="canvas-wrap" id="canvasWrap">
+    <div class="controls">
+      <button class="btn active" id="btnForce"  data-mode="force"><span class="dot" style="background:var(--gold)"></span>力导向布局</button>
+      <button class="btn"        id="btnLayer"  data-mode="layer"><span class="dot" style="background:var(--teal)"></span>分层布局</button>
+      <button class="btn"        id="btnReset">重置视图</button>
+    </div>
+    <svg class="canvas" id="canvas"></svg>
+    <div class="tooltip" id="tooltip"></div>
+    <div class="detail-panel" id="detail"></div>
+  </div>
+
+  <aside class="sidebar">
+    <h3>分组筛选</h3>
+    <div id="filters"></div>
+
+    <h3>边类型</h3>
+    <div class="legend-row"><span class="swatch" style="background:var(--edge-imports);height:2px"></span> imports · 模块导入</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--edge-calls);height:4px"></span> calls_api · HTTP 调用</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--edge-impl);height:3px"></span> implements · spec 实现</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--edge-tests);height:3px;background-image:linear-gradient(90deg,var(--edge-tests) 50%,transparent 50%);background-size:6px 3px"></span> tests · 测试覆盖</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--edge-docsfor);height:3px;background-image:linear-gradient(90deg,var(--edge-docsfor) 50%,transparent 50%);background-size:6px 3px"></span> docs_for · 文档对应</div>
+
+    <h3>节点 kind 形状</h3>
+    <div class="legend-row"><span class="shape" style="background:var(--bg-3);border-radius:2px"></span> module / service</div>
+    <div class="legend-row"><span class="shape" style="background:var(--bg-3);clip-path:polygon(15% 0,85% 0,100% 50%,85% 100%,15% 100%,0 50%)"></span> route</div>
+    <div class="legend-row"><span class="shape" style="background:var(--bg-3);border-radius:6px"></span> component / page</div>
+    <div class="legend-row"><span class="shape" style="background:var(--bg-3);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)"></span> contract</div>
+    <div class="legend-row"><span class="shape" style="background:var(--bg-3);border-radius:8px;border:1px dashed var(--redbrn)"></span> spec (胶囊 + dashed)</div>
+    <div class="legend-row"><span class="shape" style="background:var(--bg-3);clip-path:polygon(0 0,80% 0,100% 25%,100% 100%,0 100%)"></span> doc</div>
+    <div class="legend-row"><span class="shape" style="background:var(--bg-3);border-radius:2px;border:1px dashed var(--green)"></span> test (虚线)</div>
+  </aside>
+</div>
+
+<footer class="footer">
+  <div class="legend">
+    <div class="item"><span class="swatch" style="background:var(--gold)"></span>backend</div>
+    <div class="item"><span class="swatch" style="background:var(--blue)"></span>frontend</div>
+    <div class="item"><span class="swatch" style="background:var(--teal)"></span>shared</div>
+    <div class="item"><span class="swatch" style="background:var(--green)"></span>tests</div>
+    <div class="item"><span class="swatch" style="background:var(--redbrn)"></span>docs / openspec</div>
+    <div class="item"><span class="swatch" style="background:var(--rose)"></span>eval</div>
+  </div>
+  <div>悬停节点查看详情 · 点击节点展开右侧面板 · 顶部切换布局</div>
+</footer>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+/* ─── palette assignment (validated) ─────────────────────────────────────────── */
+const GROUP_COLOR = {
+  backend:  { fill: 'var(--gold)',   hex: '#b45309', soft: '#f6e8cf', softVar: '--gold-soft' },
+  frontend: { fill: 'var(--blue)',   hex: '#1d4ed8', soft: '#e3ebfd', softVar: '--blue-soft' },
+  shared:   { fill: 'var(--teal)',   hex: '#0d9488', soft: '#d8efe9', softVar: '--teal-soft' },
+  tests:    { fill: 'var(--green)',  hex: '#15803d', soft: '#dceadc', softVar: '--green-soft' },
+  docs:     { fill: 'var(--redbrn)', hex: '#9a3412', soft: '#f7e3d4', softVar: '--redbrn-soft' },
+  openspec: { fill: 'var(--redbrn)', hex: '#9a3412', soft: '#f7e3d4', softVar: '--redbrn-soft' },
+  eval:     { fill: 'var(--rose)',   hex: '#be185d', soft: '#f7dce6', softVar: '--rose-soft' },
+};
+
+/* layer x-position (for layered layout) — left = consumer, right = producer */
+const LAYER_X = {
+  frontend: 0.10,
+  shared:   0.42,
+  backend:  0.78,
+  eval:     0.92,
+  openspec: 0.30,
+  docs:     0.55,
+  tests:    0.65,
+};
+
+/* ─── data: nodes + edges (from Explore agent scan 2026-07-05) ──────────────── */
+const NODES = [
+  // backend (20)
+  { id: 'backend.api.main',                     label: '后端 API 入口骨架',                 group: 'backend', kind: 'module',   path: 'backend/apps/api/main.py' },
+  { id: 'backend.api.analysis_turns',           label: '/api/v1/analysis/turns',           group: 'backend', kind: 'route',    path: 'backend/apps/api/analysis_turns.py' },
+  { id: 'backend.api.event_eval',               label: '事件评测入口 (cases/replay)',       group: 'backend', kind: 'route',    path: 'backend/apps/api/event_eval.py' },
+  { id: 'backend.workbench_backend_api.service',label: 'Workbench 后端 service',            group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/workbench_backend_api/service.py' },
+  { id: 'backend.control_plane.router',         label: 'RouterService',                     group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/control_plane/router/service.py' },
+  { id: 'backend.control_plane.planner',        label: 'PlannerService',                    group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/control_plane/planner/service.py' },
+  { id: 'backend.control_plane.orchestrator',   label: 'OrchestratorService 主链编排',      group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/control_plane/orchestrator/service.py' },
+  { id: 'backend.control_plane.orchestrator.stage_runners', label: 'Stage runners (6 个)',  group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/control_plane/orchestrator/stage_runners/__init__.py' },
+  { id: 'backend.control_plane.session',        label: 'SessionService',                    group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/control_plane/session/service.py' },
+  { id: 'backend.capabilities.retrieval',       label: 'RetrievalFacade 本地 RAG',          group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/capabilities/retrieval/service.py' },
+  { id: 'backend.capabilities.reporting',       label: 'ReportingService',                  group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/capabilities/reporting/service.py' },
+  { id: 'backend.capabilities.structured_data', label: 'StructuredDataService',             group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/capabilities/structured_data/service.py' },
+  { id: 'backend.infra.external.gdelt',         label: 'GDELT 事件搜索 provider',           group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/infra/external/gdelt_event_search.py' },
+  { id: 'backend.infra.external.official_disclosure', label: '官方披露搜索 (cninfo/sse)',   group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/infra/external/official_disclosure_search.py' },
+  { id: 'backend.infra.llm',                    label: 'LLM client',                        group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/infra/llm/client.py' },
+  { id: 'backend.infra.embeddings',             label: 'BGE-M3 嵌入',                       group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/infra/embeddings/bge_m3.py' },
+  { id: 'backend.infra.vector_store',           label: 'Qdrant 向量库',                     group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/infra/vector_store/qdrant_store.py' },
+  { id: 'backend.infra.document_parsers',       label: 'PDF 解析器',                        group: 'backend', kind: 'service',  path: 'backend/src/finsight_agent/infra/document_parsers/pdfplumber_parser.py' },
+  { id: 'backend.config.settings',              label: 'settings 默认配置',                 group: 'backend', kind: 'module',   path: 'backend/src/finsight_agent/config/settings.py' },
+  { id: 'backend.config.feature_flags',         label: 'feature_flags',                     group: 'backend', kind: 'module',   path: 'backend/src/finsight_agent/config/feature_flags.py' },
+
+  // frontend (14)
+  { id: 'frontend.streamlit.app',                       label: 'Streamlit 入口 app.py',        group: 'frontend', kind: 'module',   path: 'frontend/streamlit_app/app.py' },
+  { id: 'frontend.streamlit.api_client',                label: 'WorkbenchApiClient',            group: 'frontend', kind: 'service',  path: 'frontend/streamlit_app/api_client.py' },
+  { id: 'frontend.streamlit.pages.analysis_view',       label: '分析视图 model',                group: 'frontend', kind: 'page',     path: 'frontend/streamlit_app/pages/analysis_view.py' },
+  { id: 'frontend.streamlit.pages.debug_view',          label: '调试视图 model',                group: 'frontend', kind: 'page',     path: 'frontend/streamlit_app/pages/debug_view.py' },
+  { id: 'frontend.streamlit.pages.eval_view',           label: '评测视图 model',                group: 'frontend', kind: 'page',     path: 'frontend/streamlit_app/pages/eval_view.py' },
+  { id: 'frontend.streamlit.components.analysis_run_form',     label: '分析请求表单',           group: 'frontend', kind: 'component',path: 'frontend/streamlit_app/components/analysis_run_form.py' },
+  { id: 'frontend.streamlit.components.response_summary_card', label: '响应摘要卡片',           group: 'frontend', kind: 'component',path: 'frontend/streamlit_app/components/response_summary_card.py' },
+  { id: 'frontend.streamlit.components.stage_observation_card',label: '阶段观测卡片',           group: 'frontend', kind: 'component',path: 'frontend/streamlit_app/components/stage_observation_card.py' },
+  { id: 'frontend.streamlit.components.trace_block_viewer',    label: 'TraceBlock 查看器',      group: 'frontend', kind: 'component',path: 'frontend/streamlit_app/components/trace_block_viewer.py' },
+  { id: 'frontend.streamlit.components.eval_case_table',       label: '评测样本表',             group: 'frontend', kind: 'component',path: 'frontend/streamlit_app/components/eval_case_table.py' },
+  { id: 'frontend.streamlit.components.eval_result_detail',    label: '评测结果详情',           group: 'frontend', kind: 'component',path: 'frontend/streamlit_app/components/eval_result_detail.py' },
+  { id: 'frontend.streamlit.state.models',              label: '视图模型 dataclass',            group: 'frontend', kind: 'module',  path: 'frontend/streamlit_app/state/models.py' },
+  { id: 'frontend.streamlit.state.workbench_state',     label: 'session_state 工具',            group: 'frontend', kind: 'module',  path: 'frontend/streamlit_app/state/workbench_state.py' },
+
+  // shared contracts (17)
+  { id: 'shared.contracts.analysis_request',           label: 'AnalysisRequest',               group: 'shared', kind: 'contract', path: 'shared/contracts/analysis_request.py' },
+  { id: 'shared.contracts.analysis_response_envelope', label: 'AnalysisResponseEnvelope',      group: 'shared', kind: 'contract', path: 'shared/contracts/analysis_response_envelope.py' },
+  { id: 'shared.contracts.final_response',             label: 'FinalResponse',                 group: 'shared', kind: 'contract', path: 'shared/contracts/final_response.py' },
+  { id: 'shared.contracts.guardrail_or_error_response',label: 'GuardrailOrErrorResponse',      group: 'shared', kind: 'contract', path: 'shared/contracts/guardrail_or_error_response.py' },
+  { id: 'shared.contracts.report_block',               label: 'ReportBlock',                   group: 'shared', kind: 'contract', path: 'shared/contracts/report_block.py' },
+  { id: 'shared.contracts.plan',                       label: 'Plan',                          group: 'shared', kind: 'contract', path: 'shared/contracts/plan.py' },
+  { id: 'shared.contracts.router_result',              label: 'RouterResult',                  group: 'shared', kind: 'contract', path: 'shared/contracts/router_result.py' },
+  { id: 'shared.contracts.session_context',            label: 'SessionContext',                group: 'shared', kind: 'contract', path: 'shared/contracts/session_context.py' },
+  { id: 'shared.contracts.stage_observation',           label: 'StageObservation',              group: 'shared', kind: 'contract', path: 'shared/contracts/stage_observation.py' },
+  { id: 'shared.contracts.trace_block',                label: 'TraceBlock',                    group: 'shared', kind: 'contract', path: 'shared/contracts/trace_block.py' },
+  { id: 'shared.contracts.evidence_bundle',            label: 'EvidenceBundle',                group: 'shared', kind: 'contract', path: 'shared/contracts/evidence_bundle.py' },
+  { id: 'shared.enums.intent',                         label: 'Intent 枚举',                   group: 'shared', kind: 'contract', path: 'shared/enums/intent.py' },
+  { id: 'shared.enums.follow_up_type',                 label: 'FollowUpType 枚举',             group: 'shared', kind: 'contract', path: 'shared/enums/follow_up_type.py' },
+  { id: 'shared.enums.response_mode',                  label: 'ResponseMode 枚举',             group: 'shared', kind: 'contract', path: 'shared/enums/response_mode.py' },
+  { id: 'shared.enums.response_type',                  label: 'ResponseType 枚举',             group: 'shared', kind: 'contract', path: 'shared/enums/response_type.py' },
+  { id: 'shared.enums.stage_name',                     label: 'StageName 枚举',                group: 'shared', kind: 'contract', path: 'shared/enums/stage_name.py' },
+  { id: 'shared.enums.support_strength',               label: 'SupportStrength 枚举',          group: 'shared', kind: 'contract', path: 'shared/enums/support_strength.py' },
+
+  // openspec (11)
+  { id: 'openspec.shared_analysis_contracts',           label: 'shared-analysis-contracts',     group: 'openspec', kind: 'spec', path: 'openspec/specs/shared-analysis-contracts/spec.md' },
+  { id: 'openspec.semantic_routing_and_planning',       label: 'semantic-routing-and-planning', group: 'openspec', kind: 'spec', path: 'openspec/specs/semantic-routing-and-planning/spec.md' },
+  { id: 'openspec.conversation_session_state',          label: 'conversation-session-state',    group: 'openspec', kind: 'spec', path: 'openspec/specs/conversation-session-state/spec.md' },
+  { id: 'openspec.event_analysis_orchestration',        label: 'event-analysis-orchestration',  group: 'openspec', kind: 'spec', path: 'openspec/specs/event-analysis-orchestration/spec.md' },
+  { id: 'openspec.evidence_retrieval_pipeline',         label: 'evidence-retrieval-pipeline',   group: 'openspec', kind: 'spec', path: 'openspec/specs/evidence-retrieval-pipeline/spec.md' },
+  { id: 'openspec.structured_market_data_support',      label: 'structured-market-data-support',group: 'openspec', kind: 'spec', path: 'openspec/specs/structured-market-data-support/spec.md' },
+  { id: 'openspec.report_trace_and_evaluation',         label: 'report-trace-and-evaluation',   group: 'openspec', kind: 'spec', path: 'openspec/specs/report-trace-and-evaluation/spec.md' },
+  { id: 'openspec.analysis_workbench',                  label: 'analysis-workbench',            group: 'openspec', kind: 'spec', path: 'openspec/specs/analysis-workbench/spec.md' },
+  { id: 'openspec.workbench_backend_api_boundary',      label: 'workbench-backend-api-boundary',group: 'openspec', kind: 'spec', path: 'openspec/specs/workbench-backend-api-boundary/spec.md' },
+  { id: 'openspec.project_implementation_architecture', label: 'project-implementation-architecture', group: 'openspec', kind: 'spec', path: 'openspec/specs/project-implementation-architecture/spec.md' },
+  { id: 'openspec.parallel_delivery_governance',        label: 'parallel-delivery-governance',  group: 'openspec', kind: 'spec', path: 'openspec/specs/parallel-delivery-governance/spec.md' },
+
+  // tests (17 — collapsed for readability)
+  { id: 'tests.unit.orchestrator',                     label: 'OrchestratorService 单测',       group: 'tests', kind: 'test', path: 'tests/unit/test_orchestrator_service.py' },
+  { id: 'tests.unit.orchestrator_stage_runners',       label: 'Stage runners 单测',             group: 'tests', kind: 'test', path: 'tests/unit/test_orchestrator_stage_runners.py' },
+  { id: 'tests.unit.semantic_routing_and_planning',    label: '路由/计划 单测',                 group: 'tests', kind: 'test', path: 'tests/unit/test_semantic_routing_and_planning.py' },
+  { id: 'tests.unit.session_context',                  label: 'Session 单测',                   group: 'tests', kind: 'test', path: 'tests/unit/test_session_context_extractor.py' },
+  { id: 'tests.unit.structured_data',                  label: '结构化数据 单测',                group: 'tests', kind: 'test', path: 'tests/unit/test_structured_data_service.py' },
+  { id: 'tests.unit.dense_retrieval',                  label: 'Dense 检索 单测',                group: 'tests', kind: 'test', path: 'tests/unit/test_dense_retrieval_service.py' },
+  { id: 'tests.unit.sparse_retrieval',                 label: 'Sparse 检索 单测',               group: 'tests', kind: 'test', path: 'tests/unit/test_sparse_retrieval_service.py' },
+  { id: 'tests.unit.qdrant',                           label: 'Qdrant 单测',                    group: 'tests', kind: 'test', path: 'tests/unit/test_qdrant_store.py' },
+  { id: 'tests.unit.pdf_corpus',                       label: 'PDF 语料构建 单测',              group: 'tests', kind: 'test', path: 'tests/unit/test_pdf_corpus_acquisition_service.py' },
+  { id: 'tests.unit.event_eval',                       label: 'event_eval 单测 (4)',            group: 'tests', kind: 'test', path: 'tests/unit/test_event_eval_*.py' },
+  { id: 'tests.unit.streamlit',                        label: 'Streamlit 单测 (5)',             group: 'tests', kind: 'test', path: 'tests/unit/test_streamlit_*.py' },
+  { id: 'tests.integration.event_replay_smoke',        label: '事件回放 smoke',                 group: 'tests', kind: 'test', path: 'tests/integration/test_event_analysis_replay_smoke.py' },
+  { id: 'tests.integration.event_impact_flow',         label: '事件影响流',                     group: 'tests', kind: 'test', path: 'tests/integration/test_event_impact_analysis_flow.py' },
+  { id: 'tests.integration.metric_lookup',             label: '结构化数据集成',                 group: 'tests', kind: 'test', path: 'tests/integration/test_metric_lookup_*.py' },
+  { id: 'tests.integration.streamlit_smoke',           label: '工作台 smoke',                   group: 'tests', kind: 'test', path: 'tests/integration/test_streamlit_workbench_smoke.py' },
+  { id: 'tests.integration.pdf_corpus',                label: 'PDF 语料集成',                   group: 'tests', kind: 'test', path: 'tests/integration/test_pdf_*.py' },
+  { id: 'tests.golden.placeholder',                    label: 'Golden placeholder',             group: 'tests', kind: 'test', path: 'tests/golden/test_golden_placeholder.py' },
+
+  // docs (11)
+  { id: 'docs.finsight.project_status',               label: '项目状态总览',                   group: 'docs', kind: 'doc', path: 'docs/finsight/project-status.md' },
+  { id: 'docs.finsight.shared_contracts_v1',          label: '共享契约 V1',                    group: 'docs', kind: 'doc', path: 'docs/finsight/shared-contracts-v1.md' },
+  { id: 'docs.finsight.frontend_backend_proposal',     label: '前后端目录提案',                 group: 'docs', kind: 'doc', path: 'docs/finsight/frontend-backend-directory-proposal.md' },
+  { id: 'docs.finsight.frontend_backend_migration_map',label: '前后端迁移映射',                 group: 'docs', kind: 'doc', path: 'docs/finsight/frontend-backend-migration-map.md' },
+  { id: 'docs.finsight.api_boundary_deferred',        label: 'API 边界延后字段',               group: 'docs', kind: 'doc', path: 'docs/finsight/api-boundary-deferred-fields.md' },
+  { id: 'docs.finsight.parallel_governance',           label: '并行交付治理',                   group: 'docs', kind: 'doc', path: 'docs/finsight/parallel-delivery-governance.md' },
+  { id: 'docs.finsight.modules.control_plane_status',  label: '控制面状态',                     group: 'docs', kind: 'doc', path: 'docs/finsight/modules/control-plane-status.md' },
+  { id: 'docs.finsight.modules.data_evidence_status', label: '数据/证据面状态',                group: 'docs', kind: 'doc', path: 'docs/finsight/modules/data-evidence-status.md' },
+  { id: 'docs.finsight.modules.presentation_eval_status', label: '呈现/评测面状态',             group: 'docs', kind: 'doc', path: 'docs/finsight/modules/presentation-eval-status.md' },
+  { id: 'docs.superpowers.specs',                     label: '设计稿合集 (10 篇)',             group: 'docs', kind: 'doc', path: 'docs/superpowers/specs/' },
+  { id: 'docs.superpowers.plans',                     label: '交付计划合集 (9 篇)',            group: 'docs', kind: 'doc', path: 'docs/superpowers/plans/' },
+
+  // eval (6)
+  { id: 'eval.event_eval_pkg',                        label: 'event_eval 包入口',              group: 'eval', kind: 'module',  path: 'backend/src/finsight_agent/evaluation/event_eval/__init__.py' },
+  { id: 'eval.event_eval.models',                     label: 'Case / Replay / Check 模型',     group: 'eval', kind: 'module',  path: 'backend/src/finsight_agent/evaluation/event_eval/models.py' },
+  { id: 'eval.event_eval.checks',                     label: '6 项确定性 checks',              group: 'eval', kind: 'service', path: 'backend/src/finsight_agent/evaluation/event_eval/checks.py' },
+  { id: 'eval.event_eval.fixture_loader',             label: 'JSONL fixture 加载器',           group: 'eval', kind: 'service', path: 'backend/src/finsight_agent/evaluation/event_eval/fixture_loader.py' },
+  { id: 'eval.event_eval.replay',                     label: 'replay_event_cases',             group: 'eval', kind: 'service', path: 'backend/src/finsight_agent/evaluation/event_eval/replay.py' },
+  { id: 'eval.event_eval.fixtures',                   label: 'event_cases_v1.jsonl',           group: 'eval', kind: 'module',  path: 'backend/src/finsight_agent/evaluation/event_eval/fixtures/event_cases_v1.jsonl' },
+];
+
+const EDGES = [
+  /* frontend → backend API */
+  { s: 'frontend.streamlit.api_client',         t: 'backend.api.analysis_turns',  k: 'calls_api' },
+  { s: 'frontend.streamlit.api_client',         t: 'backend.api.event_eval',      k: 'calls_api' },
+  { s: 'frontend.streamlit.app',                t: 'frontend.streamlit.api_client', k: 'imports' },
+
+  /* backend api → backend service */
+  { s: 'backend.api.main',                      t: 'backend.api.analysis_turns',  k: 'imports' },
+  { s: 'backend.api.main',                      t: 'backend.api.event_eval',      k: 'imports' },
+  { s: 'backend.api.analysis_turns',            t: 'backend.workbench_backend_api.service', k: 'imports' },
+  { s: 'backend.api.event_eval',                t: 'eval.event_eval.fixture_loader',  k: 'imports' },
+  { s: 'backend.api.event_eval',                t: 'eval.event_eval.replay',          k: 'imports' },
+
+  /* workbench service → control plane */
+  { s: 'backend.workbench_backend_api.service', t: 'backend.control_plane.router',          k: 'imports' },
+  { s: 'backend.workbench_backend_api.service', t: 'backend.control_plane.planner',         k: 'imports' },
+  { s: 'backend.workbench_backend_api.service', t: 'backend.control_plane.orchestrator',    k: 'imports' },
+  { s: 'backend.workbench_backend_api.service', t: 'backend.control_plane.session',         k: 'imports' },
+
+  /* orchestrator → stage runners + capabilities + infra */
+  { s: 'backend.control_plane.orchestrator',    t: 'backend.control_plane.orchestrator.stage_runners', k: 'imports' },
+  { s: 'backend.control_plane.orchestrator',    t: 'backend.capabilities.retrieval',       k: 'imports' },
+  { s: 'backend.control_plane.orchestrator',    t: 'backend.capabilities.reporting',       k: 'imports' },
+  { s: 'backend.control_plane.orchestrator',    t: 'backend.capabilities.structured_data', k: 'imports' },
+  { s: 'backend.control_plane.orchestrator',    t: 'backend.infra.external.gdelt',         k: 'imports' },
+  { s: 'backend.control_plane.orchestrator',    t: 'backend.infra.external.official_disclosure', k: 'imports' },
+
+  /* stage runners → capabilities */
+  { s: 'backend.control_plane.orchestrator.stage_runners', t: 'backend.capabilities.retrieval',       k: 'imports' },
+  { s: 'backend.control_plane.orchestrator.stage_runners', t: 'backend.capabilities.reporting',       k: 'imports' },
+  { s: 'backend.control_plane.orchestrator.stage_runners', t: 'backend.capabilities.structured_data', k: 'imports' },
+
+  /* capabilities → shared contracts */
+  { s: 'backend.capabilities.reporting',        t: 'shared.contracts.final_response',         k: 'imports' },
+  { s: 'backend.capabilities.retrieval',        t: 'shared.contracts.evidence_bundle',        k: 'imports' },
+  { s: 'backend.capabilities.structured_data',  t: 'shared.contracts.final_response',         k: 'imports' },
+
+  /* envelope aggregation */
+  { s: 'shared.contracts.analysis_response_envelope', t: 'shared.contracts.final_response',            k: 'imports' },
+  { s: 'shared.contracts.analysis_response_envelope', t: 'shared.contracts.guardrail_or_error_response', k: 'imports' },
+  { s: 'shared.contracts.analysis_response_envelope', t: 'shared.contracts.trace_block',                k: 'imports' },
+  { s: 'shared.contracts.router_result',        t: 'shared.enums.intent',                      k: 'imports' },
+  { s: 'shared.contracts.router_result',        t: 'shared.enums.follow_up_type',              k: 'imports' },
+
+  /* frontend → shared (envelope + request + trace) */
+  { s: 'frontend.streamlit.api_client',         t: 'shared.contracts.analysis_request',           k: 'imports' },
+  { s: 'frontend.streamlit.api_client',         t: 'shared.contracts.analysis_response_envelope', k: 'imports' },
+  { s: 'frontend.streamlit.api_client',         t: 'shared.contracts.final_response',             k: 'imports' },
+  { s: 'frontend.streamlit.api_client',         t: 'shared.contracts.guardrail_or_error_response',k: 'imports' },
+  { s: 'frontend.streamlit.api_client',         t: 'shared.contracts.trace_block',                k: 'imports' },
+  { s: 'frontend.streamlit.api_client',         t: 'frontend.streamlit.state.models',             k: 'imports' },
+
+  /* frontend pages/components → shared */
+  { s: 'frontend.streamlit.pages.analysis_view',t: 'shared.contracts.analysis_response_envelope', k: 'imports' },
+  { s: 'frontend.streamlit.pages.debug_view',   t: 'shared.contracts.analysis_response_envelope', k: 'imports' },
+  { s: 'frontend.streamlit.pages.eval_view',    t: 'frontend.streamlit.state.models',             k: 'imports' },
+  { s: 'frontend.streamlit.components.eval_case_table',    t: 'frontend.streamlit.state.models',       k: 'imports' },
+  { s: 'frontend.streamlit.components.eval_result_detail', t: 'frontend.streamlit.state.models',       k: 'imports' },
+  { s: 'frontend.streamlit.components.trace_block_viewer', t: 'shared.contracts.trace_block',           k: 'imports' },
+  { s: 'frontend.streamlit.components.response_summary_card', t: 'shared.contracts.analysis_response_envelope', k: 'imports' },
+  { s: 'frontend.streamlit.state.workbench_state', t: 'shared.contracts.analysis_response_envelope', k: 'imports' },
+
+  /* eval chain */
+  { s: 'eval.event_eval.replay',                t: 'eval.event_eval.checks',                       k: 'imports' },
+  { s: 'eval.event_eval.replay',                t: 'eval.event_eval.models',                       k: 'imports' },
+  { s: 'eval.event_eval.replay',                t: 'eval.event_eval.fixture_loader',               k: 'imports' },
+  { s: 'eval.event_eval.replay',                t: 'backend.workbench_backend_api.service',        k: 'imports', note: '复用主链回放真实链路' },
+  { s: 'eval.event_eval.replay',                t: 'shared.contracts.analysis_request',            k: 'imports' },
+  { s: 'eval.event_eval.replay',                t: 'shared.contracts.analysis_response_envelope',  k: 'imports' },
+  { s: 'eval.event_eval.checks',                t: 'eval.event_eval.models',                       k: 'imports' },
+  { s: 'eval.event_eval.fixture_loader',        t: 'eval.event_eval.fixtures',                     k: 'imports' },
+
+  /* spec ↔ implements */
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.analysis_request',           k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.analysis_response_envelope', k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.final_response',             k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.guardrail_or_error_response',k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.router_result',              k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.plan',                       k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.session_context',            k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.stage_observation',           k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.trace_block',                k: 'implements' },
+  { s: 'openspec.shared_analysis_contracts',           t: 'shared.contracts.evidence_bundle',            k: 'implements' },
+  { s: 'openspec.workbench_backend_api_boundary',      t: 'backend.api.main',                            k: 'implements' },
+  { s: 'openspec.workbench_backend_api_boundary',      t: 'shared.contracts.analysis_request',           k: 'implements' },
+  { s: 'openspec.workbench_backend_api_boundary',      t: 'shared.contracts.analysis_response_envelope', k: 'implements' },
+  { s: 'openspec.semantic_routing_and_planning',       t: 'backend.control_plane.router',                k: 'implements' },
+  { s: 'openspec.semantic_routing_and_planning',       t: 'backend.control_plane.planner',               k: 'implements' },
+  { s: 'openspec.conversation_session_state',          t: 'backend.control_plane.session',               k: 'implements' },
+  { s: 'openspec.event_analysis_orchestration',        t: 'backend.control_plane.orchestrator',          k: 'implements' },
+  { s: 'openspec.event_analysis_orchestration',        t: 'backend.control_plane.orchestrator.stage_runners', k: 'implements' },
+  { s: 'openspec.evidence_retrieval_pipeline',         t: 'backend.capabilities.retrieval',              k: 'implements' },
+  { s: 'openspec.evidence_retrieval_pipeline',         t: 'backend.infra.vector_store',                  k: 'implements' },
+  { s: 'openspec.evidence_retrieval_pipeline',         t: 'backend.infra.document_parsers',              k: 'implements' },
+  { s: 'openspec.evidence_retrieval_pipeline',         t: 'backend.infra.embeddings',                    k: 'implements' },
+  { s: 'openspec.structured_market_data_support',      t: 'backend.capabilities.structured_data',        k: 'implements' },
+  { s: 'openspec.report_trace_and_evaluation',         t: 'backend.capabilities.reporting',              k: 'implements' },
+  { s: 'openspec.report_trace_and_evaluation',         t: 'eval.event_eval_pkg',                         k: 'implements' },
+  { s: 'openspec.analysis_workbench',                  t: 'frontend.streamlit.app',                      k: 'implements' },
+  { s: 'openspec.analysis_workbench',                  t: 'frontend.streamlit.pages.analysis_view',      k: 'implements' },
+  { s: 'openspec.analysis_workbench',                  t: 'frontend.streamlit.pages.debug_view',         k: 'implements' },
+  { s: 'openspec.analysis_workbench',                  t: 'frontend.streamlit.pages.eval_view',          k: 'implements' },
+
+  /* tests */
+  { s: 'tests.unit.orchestrator',                     t: 'backend.control_plane.orchestrator',          k: 'tests' },
+  { s: 'tests.unit.orchestrator_stage_runners',       t: 'backend.control_plane.orchestrator.stage_runners', k: 'tests' },
+  { s: 'tests.unit.semantic_routing_and_planning',    t: 'backend.control_plane.router',                k: 'tests' },
+  { s: 'tests.unit.semantic_routing_and_planning',    t: 'backend.control_plane.planner',               k: 'tests' },
+  { s: 'tests.unit.session_context',                  t: 'backend.control_plane.session',               k: 'tests' },
+  { s: 'tests.unit.structured_data',                  t: 'backend.capabilities.structured_data',        k: 'tests' },
+  { s: 'tests.unit.dense_retrieval',                  t: 'backend.capabilities.retrieval',              k: 'tests' },
+  { s: 'tests.unit.sparse_retrieval',                 t: 'backend.capabilities.retrieval',              k: 'tests' },
+  { s: 'tests.unit.qdrant',                           t: 'backend.infra.vector_store',                  k: 'tests' },
+  { s: 'tests.unit.pdf_corpus',                       t: 'backend.infra.document_parsers',              k: 'tests' },
+  { s: 'tests.unit.event_eval',                       t: 'eval.event_eval_pkg',                         k: 'tests' },
+  { s: 'tests.unit.streamlit',                        t: 'frontend.streamlit.app',                      k: 'tests' },
+  { s: 'tests.unit.streamlit',                        t: 'frontend.streamlit.api_client',               k: 'tests' },
+  { s: 'tests.integration.event_replay_smoke',        t: 'backend.workbench_backend_api.service',       k: 'tests' },
+  { s: 'tests.integration.event_replay_smoke',        t: 'eval.event_eval.replay',                      k: 'tests' },
+  { s: 'tests.integration.event_impact_flow',         t: 'backend.control_plane.orchestrator',          k: 'tests' },
+  { s: 'tests.integration.metric_lookup',             t: 'backend.capabilities.structured_data',        k: 'tests' },
+  { s: 'tests.integration.streamlit_smoke',           t: 'frontend.streamlit.app',                      k: 'tests' },
+
+  /* docs ↔ */
+  { s: 'openspec.project_implementation_architecture', t: 'backend.api.main',                       k: 'docs_for' },
+  { s: 'openspec.project_implementation_architecture', t: 'shared.contracts.analysis_request',      k: 'docs_for' },
+  { s: 'openspec.project_implementation_architecture', t: 'frontend.streamlit.app',                  k: 'docs_for' },
+  { s: 'openspec.parallel_delivery_governance',        t: 'docs.finsight.project_status',             k: 'docs_for' },
+  { s: 'openspec.parallel_delivery_governance',        t: 'docs.finsight.modules.control_plane_status',k: 'docs_for' },
+  { s: 'openspec.parallel_delivery_governance',        t: 'docs.finsight.modules.data_evidence_status',k: 'docs_for' },
+  { s: 'openspec.parallel_delivery_governance',        t: 'docs.finsight.modules.presentation_eval_status',k: 'docs_for' },
+];
+
+/* ─── render ───────────────────────────────────────────────────────────────── */
+const svgEl = document.getElementById('canvas');
+const tooltip = document.getElementById('tooltip');
+const detailEl = document.getElementById('detail');
+const wrap = document.getElementById('canvasWrap');
+
+const W = () => wrap.clientWidth;
+const H = () => wrap.clientHeight;
+
+const svg = d3.select(svgEl).attr('viewBox', null);
+const defs = svg.append('defs');
+defs.append('marker')
+  .attr('id', 'arrow').attr('viewBox','0 -5 10 10').attr('refX', 18).attr('refY', 0)
+  .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+  .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', 'currentColor');
+
+const groupColor = (g) => GROUP_COLOR[g]?.hex || '#666';
+
+/* node shapes via SVG path or rect */
+const KIND_SHAPE = {
+  module:    (x, y, w, h) => `M${x-w/2},${y-h/2} h${w} v${h} h${-w} z`,
+  service:   (x, y, w, h) => rectPath(x, y, w, h, 8),
+  route:     (x, y, w, h) => hexPath(x, y, w, h),
+  component: (x, y, w, h) => `M${x-w/2},${y-h/2} q${w/2},0 ${w/2},${h/2} q0,${h/2} ${-w/2},${h/2} q${-w/2},0 ${-w/2},${-h/2} z`,
+  page:      (x, y, w, h) => `M${x-w/2},${y-h/2} q${w/2},0 ${w/2},${h/2} q0,${h/2} ${-w/2},${h/2} q${-w/2},0 ${-w/2},${-h/2} z`,
+  contract:  (x, y, w, h) => `M${x},${y-h/2} L${x+w/2},${y} L${x},${y+h/2} L${x-w/2},${y} z`,
+  spec:      (x, y, w, h) => `M${x-w/2},${y-h/2} h${w} a${h/2},${h/2} 0 0 1 0,${h} h${-w} a${h/2},${h/2} 0 0 1 0,${-h} z`,
+  doc:       (x, y, w, h) => `M${x-w/2},${y-h/2} h${w*0.7} l${w*0.3},${h*0.3} v${h*0.7} h${-w} z`,
+  test:      (x, y, w, h) => rectPath(x, y, w, h, 2),
+};
+function rectPath(x, y, w, h, r) {
+  return `M${x-w/2+r},${y-h/2} h${w-2*r} a${r},${r} 0 0 1 ${r},${r} v${h-2*r} a${r},${r} 0 0 1 ${-r},${r} h${-(w-2*r)} a${r},${r} 0 0 1 ${-r},${-r} v${-(h-2*r)} a${r},${r} 0 0 1 ${r},${-r} z`;
+}
+function hexPath(x, y, w, h) {
+  const cx = w * 0.18;
+  return `M${x-w/2+cx},${y-h/2} h${w-2*cx} l${cx},${h/2} l${-cx},${h/2} h${-(w-2*cx)} l${-cx},${-h/2} z`;
+}
+
+const nodeW = (n) => Math.min(180, Math.max(70, n.label.length * 8 + 22));
+const nodeH = (n) => (n.kind === 'page' || n.kind === 'component') ? 32 : 26;
+
+/* render simulation */
+let simulation, nodeSel, edgeSel;
+let activeGroups = new Set(Object.keys(GROUP_COLOR));
+let layoutMode = 'force';
+
+function renderGraph() {
+  svg.selectAll('g.canvas-root').remove();
+  const root = svg.append('g').attr('class', 'canvas-root');
+
+  /* arrows for each edge color */
+  ['imports','calls_api','implements','tests','docs_for'].forEach(k => {
+    const c = getComputedStyle(document.documentElement).getPropertyValue(
+      {imports:'--edge-imports',calls_api:'--edge-calls',implements:'--edge-impl',tests:'--edge-tests',docs_for:'--edge-docsfor'}[k]
+    ).trim();
+    defs.append('marker').attr('id', 'arrow-'+k).attr('viewBox','0 -5 10 10').attr('refX', 14).attr('refY', 0)
+      .attr('markerWidth', 7).attr('markerHeight', 7).attr('orient', 'auto')
+      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', c);
+  });
+
+  const nodes = NODES.map(n => ({ ...n, w: nodeW(n), h: nodeH(n) }));
+  const edges = EDGES.map(e => ({ source: e.s, target: e.t, kind: e.k, note: e.note }));
+
+  /* edges */
+  edgeSel = root.append('g').attr('class','edges').selectAll('path')
+    .data(edges).enter().append('path')
+    .attr('class', d => `edge ${d.kind}`)
+    .attr('marker-end', d => `url(#arrow-${d.kind})`);
+
+  /* nodes */
+  nodeSel = root.append('g').attr('class','nodes').selectAll('g')
+    .data(nodes).enter().append('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', (event, d) => { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag',  (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on('end',   (event, d) => { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }))
+    .on('mouseenter', (event, d) => { showTooltip(event, d); highlight(d, true); })
+    .on('mousemove',  (event) => moveTooltip(event))
+    .on('mouseleave', (event, d) => { hideTooltip(); highlight(d, false); })
+    .on('click', (event, d) => showDetail(d));
+
+  /* shape */
+  nodeSel.append('path')
+    .attr('d', d => KIND_SHAPE[d.kind](0, 0, d.w, d.h))
+    .attr('fill', d => GROUP_COLOR[d.group].soft)
+    .attr('stroke', d => GROUP_COLOR[d.group].hex)
+    .attr('stroke-width', d => d.kind === 'spec' ? 1.5 : (d.kind === 'test' ? 1.2 : 1))
+    .attr('stroke-dasharray', d => d.kind === 'test' || d.kind === 'spec' ? '4 3' : null)
+    .attr('opacity', 0.95);
+
+  /* kind tag inside top */
+  nodeSel.append('text')
+    .attr('class', 'kind-tag')
+    .attr('y', d => -d.h/2 + 9)
+    .text(d => d.kind);
+
+  /* label below shape */
+  nodeSel.append('text')
+    .attr('class', 'node-label')
+    .attr('y', d => d.h/2 + 12)
+    .text(d => trimLabel(d.label));
+
+  /* simulation */
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(d => d.kind === 'calls_api' ? 80 : 60).strength(0.6))
+    .force('charge', d3.forceManyBody().strength(-220))
+    .force('collide', d3.forceCollide().radius(d => Math.max(d.w, d.h)/2 + 8))
+    .force('center', d3.forceCenter(W()/2, H()/2))
+    .on('tick', ticked);
+}
+
+function trimLabel(s) {
+  if (s.length <= 14) return s;
+  return s.slice(0, 13) + '…';
+}
+
+function ticked() {
+  edgeSel.attr('d', d => {
+    const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
+    const dx = tx - sx, dy = ty - sy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx/len, uy = dy/len;
+    /* shorten end so arrowhead sits at node edge */
+    const ex = tx - ux * (Math.max(d.target.w, d.target.h)/2 + 2);
+    const ey = ty - uy * (Math.max(d.target.w, d.target.h)/2 + 2);
+    const sx2 = sx + ux * (Math.max(d.source.w, d.source.h)/2 + 2);
+    const sy2 = sy + uy * (Math.max(d.source.w, d.source.h)/2 + 2);
+    return `M${sx2},${sy2} L${ex},${ey}`;
+  });
+
+  nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+}
+
+function showTooltip(event, d) {
+  tooltip.innerHTML = `
+    <div class="ttl">${escapeHtml(d.label)}</div>
+    <div class="meta">
+      <span class="badge" style="background:${GROUP_COLOR[d.group].soft};color:${GROUP_COLOR[d.group].hex}">${d.group}</span>
+      <span class="badge">${d.kind}</span>
+    </div>
+    <div class="meta">${escapeHtml(d.path)}</div>
+  `;
+  tooltip.classList.add('show');
+  moveTooltip(event);
+}
+function moveTooltip(event) {
+  const r = wrap.getBoundingClientRect();
+  const x = event.clientX - r.left + 12;
+  const y = event.clientY - r.top + 12;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top = y + 'px';
+}
+function hideTooltip() { tooltip.classList.remove('show'); }
+
+function highlight(d, on) {
+  if (!on) {
+    nodeSel.classed('dim', false);
+    edgeSel.classed('dim', false);
+    return;
+  }
+  const connectedIds = new Set([d.id]);
+  edgeSel.each(e => {
+    const s = e.source.id || e.source, t = e.target.id || e.target;
+    if (s === d.id) connectedIds.add(t);
+    if (t === d.id) connectedIds.add(s);
+  });
+  nodeSel.classed('dim', n => !connectedIds.has(n.id));
+  edgeSel.classed('dim', e => {
+    const s = e.source.id || e.source, t = e.target.id || e.target;
+    return !(s === d.id || t === d.id);
+  });
+}
+
+function showDetail(d) {
+  const incoming = EDGES.filter(e => e.t === d.id).map(e => `${EDGE_LABEL[e.k] || e.k} ← ${shortId(e.s)}`);
+  const outgoing = EDGES.filter(e => e.s === d.id).map(e => `${EDGE_LABEL[e.k] || e.k} → ${shortId(e.t)}`);
+  detailEl.innerHTML = `
+    <div class="head">
+      <div class="ttl">${escapeHtml(d.label)}</div>
+      <button class="close" id="closeDetail">×</button>
+    </div>
+    <div class="meta">
+      <span class="badge" style="background:${GROUP_COLOR[d.group].soft};color:${GROUP_COLOR[d.group].hex}">${d.group}</span>
+      <span class="badge">${d.kind}</span><br>
+      ${escapeHtml(d.path)}
+    </div>
+    ${outgoing.length ? `<div class="section"><div class="lab">依赖此节点 (${outgoing.length})</div><div class="edge-list">${outgoing.map(s => `<div>${s}</div>`).join('')}</div></div>` : ''}
+    ${incoming.length ? `<div class="section"><div class="lab">被依赖 (${incoming.length})</div><div class="edge-list">${incoming.map(s => `<div>${s}</div>`).join('')}</div></div>` : ''}
+  `;
+  detailEl.classList.add('show');
+  document.getElementById('closeDetail').onclick = () => detailEl.classList.remove('show');
+}
+function shortId(id) {
+  const n = NODES.find(n => n.id === id);
+  return n ? n.label : id;
+}
+const EDGE_LABEL = { imports: 'imports', calls_api: 'calls_api', implements: 'implements', tests: 'tests', docs_for: 'docs_for' };
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+/* ─── group filter ─────────────────────────────────────────────────────────── */
+function renderFilters() {
+  const el = document.getElementById('filters');
+  el.innerHTML = '';
+  Object.keys(GROUP_COLOR).forEach(g => {
+    const count = NODES.filter(n => n.group === g).length;
+    const row = document.createElement('label');
+    row.className = 'filter-row';
+    row.innerHTML = `
+      <input type="checkbox" data-group="${g}" checked>
+      <span class="swatch" style="background:${GROUP_COLOR[g].hex}"></span>
+      <span>${g}</span>
+      <span class="count">${count}</span>
+    `;
+    el.appendChild(row);
+    row.querySelector('input').addEventListener('change', (e) => {
+      const on = e.target.checked;
+      activeGroups.has(g) ? activeGroups.delete(g) : activeGroups.add(g);
+      if (on) activeGroups.add(g); else activeGroups.delete(g);
+      row.classList.toggle('off', !on);
+      applyGroupFilter();
+    });
+  });
+}
+function applyGroupFilter() {
+  nodeSel.classed('dim', d => !activeGroups.has(d.group));
+  edgeSel.classed('dim', d => {
+    const sn = NODES.find(n => n.id === (d.source.id || d.source));
+    const tn = NODES.find(n => n.id === (d.target.id || d.target));
+    return !(activeGroups.has(sn.group) && activeGroups.has(tn.group));
+  });
+}
+
+/* ─── layout toggle ────────────────────────────────────────────────────────── */
+function setLayout(mode) {
+  layoutMode = mode;
+  document.getElementById('btnForce').classList.toggle('active', mode==='force');
+  document.getElementById('btnLayer').classList.toggle('active', mode==='layer');
+  if (mode === 'force') {
+    simulation
+      .force('x', null).force('y', null)
+      .alpha(1).restart();
+  } else {
+    const w = W(), h = H();
+    simulation
+      .force('x', d3.forceX(d => LAYER_X[d.group] * w).strength(0.6))
+      .force('y', d3.forceY(h/2).strength(0.05))
+      .alpha(1).restart();
+  }
+}
+
+document.getElementById('btnForce').onclick = () => setLayout('force');
+document.getElementById('btnLayer').onclick = () => setLayout('layer');
+document.getElementById('btnReset').onclick = () => {
+  if (layoutMode === 'force') simulation.alpha(1).restart();
+  else setLayout('layer');
+};
+
+/* ─── resize ───────────────────────────────────────────────────────────────── */
+window.addEventListener('resize', () => {
+  simulation.force('center', d3.forceCenter(W()/2, H()/2));
+  if (layoutMode === 'layer') {
+    const w = W(), h = H();
+    simulation.force('x', d3.forceX(d => LAYER_X[d.group] * w).strength(0.6))
+              .force('y', d3.forceY(h/2).strength(0.05));
+  }
+  simulation.alpha(0.3).restart();
+});
+
+/* ─── bootstrap ────────────────────────────────────────────────────────────── */
+renderGraph();
+renderFilters();
+setLayout('force');
+</script>
+</body>
+</html>

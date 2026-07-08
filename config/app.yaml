@@ -7,6 +7,10 @@ app:
     prompts:
       router_system_prompt_path: router/prompts/system.txt
       planner_system_prompt_path: planner/prompts/system.txt
+  reporting:
+    root: backend/src/finsight_agent/capabilities/reporting
+    prompts:
+      final_answer_writer_system_prompt_path: prompts/system.txt
   retrieval:
     manifest_path: var/data/corpus_manifests/semiconductor_sample_universe.yaml
     raw_filings_root: var/data/raw_filings

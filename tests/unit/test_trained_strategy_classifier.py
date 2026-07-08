@@ -174,6 +174,41 @@ class TrainedClassifierMockedModelTest(unittest.TestCase):
         self.assertIn("margin=", payload["reason"])
         self.assertIn("top1=", payload["reason"])
 
+    def test_build_input_depends_only_on_query(self) -> None:
+        from finsight_agent.control_plane.orchestrator import trained_strategy_classifier as mod
+
+        clf = mod.TrainedRetrievalStrategyClassifier(
+            model_dir=Path("/nonexistent/path/that/does/not/exist"),
+        )
+        text_a = clf._build_input(
+            query="红海局势最近怎么了？",
+            router_payload={
+                "intent": "event_impact_analysis",
+                "entities": {
+                    "event": "红海局势",
+                    "themes": ["航运", "地缘"],
+                    "target": "A股航运板块",
+                    "time_scope": "recent",
+                },
+            },
+            session_topic="航运主线",
+        )
+        text_b = clf._build_input(
+            query="红海局势最近怎么了？",
+            router_payload={
+                "intent": "event_impact_analysis",
+                "entities": {
+                    "event": "完全不同的事件",
+                    "themes": ["半导体"],
+                    "target": "中芯国际",
+                    "time_scope": "historic",
+                },
+            },
+            session_topic="半导体主线",
+        )
+        self.assertEqual(text_a, "[QUERY] 红海局势最近怎么了？")
+        self.assertEqual(text_a, text_b)
+
     def test_confidence_high_when_margin_above_high_threshold(self) -> None:
         import tempfile
 

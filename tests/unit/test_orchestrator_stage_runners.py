@@ -665,6 +665,67 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
                 next_actions=[],
             )
 
+    def test_build_report_response_populates_answer_markdown_from_llm(self) -> None:
+        service = ReportingService(
+            llm_client=_StubLlmClient(
+                {
+                    "answer_markdown": "这是最终回答。",
+                    "answer_confidence": "high",
+                }
+            )
+        )
+
+        result = service.build_report_response(
+            session_id="sess_answer",
+            summary="已拿到初步结论。",
+            report_blocks=[
+                EvidenceOverviewBlock(
+                    block_type="evidence_overview",
+                    title="证据概览",
+                    items=[
+                        EvidenceOverviewItem(
+                            evidence_id="evd_001",
+                            excerpt="证据 1",
+                            company_name="示例公司",
+                            doc_type="annual_report",
+                        )
+                    ],
+                )
+            ],
+            uncertainty_notes=["证据仍有限"],
+            next_actions=["继续追问"],
+            final_answer_context={
+                "query": "红海局势最近怎么了？",
+                "strategy": "event_primary",
+                "event_evidence_count": 1,
+                "company_evidence_count": 0,
+            },
+        )
+
+        self.assertEqual(result.answer_markdown, "这是最终回答。")
+
+    def test_build_brief_response_populates_answer_markdown(self) -> None:
+        service = ReportingService(
+            llm_client=_StubLlmClient(
+                {
+                    "answer_markdown": "宁德时代 2024Q1 营收为 123.45。",
+                    "answer_confidence": "high",
+                }
+            )
+        )
+
+        result = service.build_brief_response(
+            session_id="sess_brief_answer",
+            summary="宁德时代2024Q1营收为123.45。",
+            final_answer_context={
+                "query": "宁德时代 2024Q1 营收是多少？",
+                "intent": "metric_lookup",
+                "strategy": "structured_data",
+            },
+        )
+
+        self.assertEqual(result.answer_markdown, "宁德时代 2024Q1 营收为 123.45。")
+
 
 if __name__ == "__main__":
     unittest.main()
