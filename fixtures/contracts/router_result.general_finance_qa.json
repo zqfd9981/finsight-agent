@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "intent": "general_finance_qa",
+  "follow_up_type": "none",
+  "confidence": "medium",
+  "entities": {
+    "query": "人民币贬值压力从哪来",
+    "topics": ["汇率"]
+  },
+  "needs": ["direct_llm"],
+  "constraints": {
+    "preferred_output": "direct"
+  }
+}
