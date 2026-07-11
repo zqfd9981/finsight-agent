@@ -30,11 +30,11 @@
 - 股价 / 股票价格
 - 估值模型
 - 目标价
-- 下周走势 / 短线 / 投资建议
+- 下周走势 / 短线 / 投资建议 / 推荐买 / 荐股
 
 ---
 
-### 2️. evidence_lookup
+### 2. evidence_lookup
 当 query 明显在索取依据或展开前文时：
 - 证据、依据、原文、出处
 - 展开、同比变化原因
@@ -44,7 +44,7 @@
 
 ---
 
-### 3️. event_impact_analysis
+### 3. event_impact_analysis
 当 query 关注事件对市场或行业的影响时：
 - 利好哪些、受益、影响哪些
 - 航运、油运、板块等主题
@@ -67,9 +67,21 @@
 
 ---
 
-### 5. 兜底规则
-如果无法明确归类：
-→ 统一设为 `out_of_scope`
+### 5. general_finance_qa（兜底轻路径）
+当 query 属于金融领域但不属于上述任一类型时，设为 `general_finance_qa`。这类问题适合用常识/机制解释直接回答，不需要检索具体证据：
+- 宏观机制解释（"人民币贬值压力从哪来"）
+- 概念解释（"降息对债市意味着什么"）
+- 行业常识（"半导体周期一般怎么走"）
+- 开放观点组织（"美元降息节奏放缓后人民币汇率怎么走"）
+
+**保守 fallback**：如果 query 出现具体公司名 + 财务词，应判为 metric_lookup；
+如果出现"某公司公告/业绩预告"字样，应判为 event_impact_analysis。
+
+---
+
+### 6. 兜底规则
+如果无法明确归类且不属于金融领域常识问题：
+→ 统一设为 `general_finance_qa`（宁可走轻路径直答，也不要轻易拒答）
 
 ---
 
@@ -78,7 +90,7 @@
 - compare：对比、比较、谁更、差异
 - drilldown：展开、证据、依据、原文、出处、同比变化原因
 - expand：继续、延伸、还有哪些、再看看
-- redirect：话题明显切换（如从“航运”切换到“贵州茅台”）
+- redirect：话题明显切换（如从"航运"切换到"贵州茅台"）
 - none：以上均不满足
 
 ---
@@ -89,6 +101,7 @@
 - metric_lookup
 - event_impact_analysis
 - evidence_lookup
+- general_finance_qa
 - out_of_scope
 
 ### follow_up_type（仅允许）
@@ -112,6 +125,7 @@
 - themes
 - target
 - claim
+- topics（general_finance_qa 用，如 ["汇率", "货币政策"]）
 
 ### needs
 下游所需能力，可选值：
@@ -119,10 +133,11 @@
 - rag_retrieval
 - news_search
 - concept_mapping
+- direct_llm（general_finance_qa 用，表示 LLM 直答无需检索）
 
 ### constraints
 用于控制输出与检索行为，例如：
-- preferred_output: brief_answer | report | guardrail
+- preferred_output: brief_answer | report | direct | guardrail
 - time_hint: recent | latest | 2023_annual | unspecified
 
 ---
@@ -133,7 +148,8 @@
 -  不新增字段
 -  不省略字段
 -  不输出解释、推理过程
--  不确定时优先输出 out_of_scope
+-  不确定时优先输出 general_finance_qa（而非 out_of_scope）
+-  只有命中荐股/投资建议/股价预测才设为 out_of_scope
 -  所有字符串使用中文或枚举值原文
 
 ---

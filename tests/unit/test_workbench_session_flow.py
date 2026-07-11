@@ -20,7 +20,6 @@ from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
 from shared.contracts.analysis_stream_event import AnalysisStreamEvent
 from shared.contracts.final_response import FinalResponse
-from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
 
@@ -57,37 +56,15 @@ class RecordingRouterService:
         )
 
 
-class StubPlannerService:
-    def build_plan(
-        self,
-        router_result: RouterResult,
-        strategy_payload: dict[str, str] | None = None,
-    ) -> Plan:
-        del strategy_payload
-        if router_result.intent == "evidence_lookup":
-            return Plan(
-                plan_id="plan_evidence_lookup_v1",
-                intent="evidence_lookup",
-                stages=["retrieve_evidence", "synthesize_report"],
-                stage_constraints={},
-                response_mode="report",
-            )
-        return Plan(
-            plan_id="plan_metric_lookup_v1",
-            intent="metric_lookup",
-            stages=["query_structured_data", "synthesize_brief_answer"],
-            stage_constraints={},
-            response_mode="brief_answer",
-        )
-
-
 class StubOrchestratorService:
     def execute(
         self,
         *,
         request: AnalysisRequest,
         router_result: RouterResult,
-        plan: Plan,
+        stages: list[str],
+        stage_constraints: dict,
+        response_mode: str = "",
         session_context: SessionContext | None,
         event_callback=None,
     ):
@@ -128,7 +105,8 @@ class StubOrchestratorService:
             result = OrchestrationResult(
                 session_id=request.session_id or "",
                 router_result=router_result,
-                plan=plan,
+                stages=stages,
+                response_mode=response_mode,
                 final_response=response,
             )
             result.stage_observations.append(
@@ -159,7 +137,8 @@ class StubOrchestratorService:
         return OrchestrationResult(
             session_id=request.session_id or "",
             router_result=router_result,
-            plan=plan,
+            stages=stages,
+            response_mode=response_mode,
             final_response=FinalResponse(
                 response_type="success",
                 session_id=request.session_id or "",
@@ -194,20 +173,17 @@ class SessionServiceTest(unittest.TestCase):
                 needs=["structured_data_query"],
                 constraints={"preferred_output": "brief_answer"},
             )
-            plan = Plan(
-                plan_id="plan_metric_lookup_v1",
-                intent="metric_lookup",
-                stages=["query_structured_data", "synthesize_brief_answer"],
-                stage_constraints={},
-                response_mode="brief_answer",
-            )
+            stages = ["query_structured_data", "synthesize_brief_answer"]
+            response_mode = "brief_answer"
             orchestration_result = StubOrchestratorService().execute(
                 request=AnalysisRequest(
                     query="CATL 2024 net profit?",
                     session_id="sess_metric",
                 ),
                 router_result=router_result,
-                plan=plan,
+                stages=stages,
+                stage_constraints={},
+                response_mode=response_mode,
                 session_context=None,
             )
 
@@ -217,7 +193,7 @@ class SessionServiceTest(unittest.TestCase):
                     session_id="sess_metric",
                 ),
                 router_result=router_result,
-                plan=plan,
+                stages=stages,
                 orchestration_result=orchestration_result,
             )
             assert snapshot is not None
@@ -237,7 +213,6 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             session_service = SessionService(repository=repository)
             service = WorkbenchBackendApiService(
                 router_service=RecordingRouterService(),
-                planner_service=StubPlannerService(),
                 orchestrator_service=StubOrchestratorService(),
                 session_service=session_service,
             )
@@ -259,7 +234,6 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             router_service = RecordingRouterService()
             service = WorkbenchBackendApiService(
                 router_service=router_service,
-                planner_service=StubPlannerService(),
                 orchestrator_service=StubOrchestratorService(),
                 session_service=session_service,
             )
@@ -289,7 +263,6 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             session_service = SessionService(repository=repository)
             service = WorkbenchBackendApiService(
                 router_service=RecordingRouterService(),
-                planner_service=StubPlannerService(),
                 orchestrator_service=StubOrchestratorService(),
                 session_service=session_service,
             )
@@ -318,7 +291,6 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             router_service = RecordingRouterService()
             service = WorkbenchBackendApiService(
                 router_service=router_service,
-                planner_service=StubPlannerService(),
                 orchestrator_service=StubOrchestratorService(),
                 session_service=session_service,
             )
@@ -340,7 +312,6 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             session_service = SessionService(repository=repository)
             service = WorkbenchBackendApiService(
                 router_service=RecordingRouterService(),
-                planner_service=StubPlannerService(),
                 orchestrator_service=StubOrchestratorService(),
                 session_service=session_service,
             )
@@ -354,8 +325,8 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
         self.assertEqual(events[0].event_type, "run_started")
         self.assertEqual(events[1].stage_name, "routing")
         self.assertEqual(events[2].stage_name, "routing")
-        self.assertEqual(events[3].stage_name, "planning")
-        self.assertEqual(events[4].stage_name, "planning")
+        self.assertEqual(events[3].stage_name, "stage_planning")
+        self.assertEqual(events[4].stage_name, "stage_planning")
         self.assertEqual(events[-1].event_type, "run_finished")
         self.assertEqual(events[-1].final_response["response_type"], "success")
         self.assertIn("response_envelope", events[-1].payload)

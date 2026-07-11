@@ -1,14 +1,14 @@
 # FinSight V1 项目状态
 
-日期：2026-07-07
-状态：控制面、结构化数据、证据检索、事件主链与检索策略分类器均已形成首版可运行闭环，项目进入”能力增强、评测补强与稳定性优化”阶段。
+日期：2026-07-09
+状态：控制面、结构化数据、证据检索、事件主链与检索策略分类器均已形成首版可运行闭环，项目进入”能力增强、评测补强与稳定性优化”阶段；控制面已完成 planner 合并 + synthesize 精简 + 泛财经轻路径重构。
 
 ## 总览
 
 当前已经完成这些关键闭环：
 
 - shared contracts、统一 API boundary、trace/envelope 已稳定落地
-- `semantic-routing-and-planning` 已稳定输出 `RouterResult` 与 `Plan`
+- `semantic-routing-and-planning` 已稳定输出 `RouterResult`，planner 层已合并入 orchestrator 的 stage 查表函数
 - retrieval facade 已稳定返回结构化 `RetrievalResult`
 - `structured-market-data-support` 已完成”本地指标库 + 外部 fallback”首版闭环
 - orchestrator 已接通三条真实执行链：
@@ -40,6 +40,7 @@
 | M9 Workbench Runnable | 完成首版 | 后端 FastAPI 入口 + Streamlit 工作台已可一键启动；见 [operations/workbench-runbook.md](operations/workbench-runbook.md) |
 | M10 Event Search Replace | 完成首版 | 事件搜索 provider 由 GDELT 整体替换为博查（Bocha）Web Search API；新增 `EventSearchProvider` Protocol 抽象边界；新增护栏测试防 GDELT 回潮；见 [specs/2026-07-06-bocha-event-search-replace-gdelt-design.md](../superpowers/specs/2026-07-06-bocha-event-search-replace-gdelt-design.md) |
 | M11 Strategy Classifier Trained | 完成首版 | `RetrievalStrategyClassifier` 从 stub 升级到 StructBERT 中文 base 微调三分类器；301 条标注 / test acc 93.18% / per-class F1 0.88-1.00；失败回退到 stub；见 [specs/2026-07-07-retrieval-strategy-classifier-training-design.md](../superpowers/specs/2026-07-07-retrieval-strategy-classifier-training-design.md) |
+| M12 Control Plane Collapse | 完成 | 删除 planner 层，stage 编排职责合并入 orchestrator 的 `resolve_stages` 查表函数；3 个 synthesize_* stage 合并为 1 个 `synthesize_answer` 按 `response_mode` 分发；新增 `general_finance_qa` 轻路径 + `direct` response_mode；收紧 `out_of_scope` 判定；新增 4 个 reporting prompt 模板 |
 
 ## 本轮新增成果
 
@@ -84,6 +85,16 @@
   - `event_eval/fixtures/event_cases_v1.jsonl` 6 条 E2E 命中 4 条（含 2 条边界分歧）
   - trace `source_status` 透传 `strategy_reason` / `strategy_confidence` / `strategy_source`
 
+### 控制面重构成果
+
+- 删除 `planner/` 整目录与 `shared/contracts/plan.py`
+- 新增 `orchestrator/stage_planner.py` 提供 `resolve_stages` 纯查表函数
+- 3 个 synthesize_* runner 合并为 1 个 `synthesize_answer`，按 `response_mode`（direct / brief_answer / event_answer / report）分发
+- 新增 `general_finance_qa` intent + `direct` response_mode，泛财经常识问题走 LLM 直答轻路径
+- 收紧 `out_of_scope`，只对投资建议/荐股/股价预测触发
+- 新增 4 个 reporting prompt 模板 + reporting service 统一 `build_response` 入口
+- stage 数从 7 → 6，intent 数从 4 → 5
+
 ## 当前重点风险
 
 ### 1. 真实外部检索已接入，首版评测基线已建立
@@ -111,6 +122,11 @@
 - `event_eval/fixtures/event_cases_v1.jsonl` 的 6 条 canonical 样本 E2E 命中 4 条，剩余 2 条集中在 event→disclosure 与 dual→disclosure 边界
 - 这两条 query 在 themes 包含具体行业（如”航运””消费电子”）时，模型偏向 disclosure_primary；属可辩护判断，但与原 label 略偏
 - 不阻塞主流程；后续可通过补”含具体行业主题的 event_primary / dual_primary”样本回炉
+
+### 5. 控制面重构后 general_finance_qa 路由边界需持续观察
+
+影响：
+- 泛财经问题与 metric_lookup / event_impact_analysis 的边界依赖 router 规则保守 fallback，具体公司+财务词仍走 metric_lookup，公告类走 event_impact_analysis，但边界 query 可能误判
 
 ## 下一阶段建议
 

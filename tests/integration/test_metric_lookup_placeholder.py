@@ -33,7 +33,7 @@ class MetricLookupIntegrationTest(unittest.TestCase):
         self.assertEqual(payload["response"]["response_type"], "success")
         self.assertEqual(
             [block["block_type"] for block in payload["trace_blocks"]],
-            ["routing", "planning", "execution"],
+            ["routing", "stage_planning", "execution"],
         )
         self.assertEqual(
             payload["trace_blocks"][0]["payload_summary"]["intent"],

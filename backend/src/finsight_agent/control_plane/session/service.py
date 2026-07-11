@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 
 from finsight_agent.control_plane.orchestrator.models import OrchestrationResult
 from shared.contracts.analysis_request import AnalysisRequest
-from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
 
@@ -39,7 +38,7 @@ class SessionService:
         *,
         request: AnalysisRequest,
         router_result: RouterResult,
-        plan: Plan,
+        stages: list[str],
         orchestration_result: OrchestrationResult,
     ) -> SessionSnapshot | None:
         if router_result.intent == "out_of_scope":
@@ -60,7 +59,6 @@ class SessionService:
         context = self._extractor.extract(
             request=request,
             router_result=router_result,
-            plan=plan,
             orchestration_result=orchestration_result,
             previous_context=previous_context,
         )
@@ -71,7 +69,7 @@ class SessionService:
             last_query_mode=request.query_mode,
             last_intent=router_result.intent,
             last_follow_up_type=router_result.follow_up_type,
-            last_plan_stages=list(plan.stages),
+            last_plan_stages=list(stages),
             context=context,
             updated_at=datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
         )

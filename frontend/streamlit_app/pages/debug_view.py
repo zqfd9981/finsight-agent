@@ -33,19 +33,19 @@ def _normalize_response_payload(
 
 def build_debug_view_model(envelope: AnalysisResponseEnvelope) -> dict[str, object]:
     routing: dict[str, object] = {}
-    planning: dict[str, object] = {}
+    stage_planning: dict[str, object] = {}
     execution: dict[str, object] = {"stage_statuses": {}, "stage_observations": []}
     for block in envelope.trace_blocks:
         if block.block_type == "routing":
             routing = dict(block.payload_summary)
-        elif block.block_type == "planning":
-            planning = dict(block.payload_summary)
+        elif block.block_type == "stage_planning":
+            stage_planning = dict(block.payload_summary)
         elif block.block_type == "execution":
             execution = dict(block.payload_summary)
     stages = list(execution.get("stage_observations", []))
     return {
         "routing": routing,
-        "planning": planning,
+        "stage_planning": stage_planning,
         "execution": execution,
         "stages": stages,
         "response_type": str(getattr(envelope.response, "response_type", "") or ""),
@@ -65,8 +65,8 @@ def render_debug_view() -> None:
         st.json(model["final_response"])
     with st.expander("Routing", expanded=True):
         st.json(model["routing"])
-    with st.expander("Planning", expanded=False):
-        st.json(model["planning"])
+    with st.expander("Stage Planning", expanded=False):
+        st.json(model["stage_planning"])
     with st.expander("Execution", expanded=True):
         st.json(model["execution"])
     st.markdown("**Stage 观察：**")

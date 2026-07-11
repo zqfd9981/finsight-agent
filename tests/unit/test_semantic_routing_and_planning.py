@@ -12,7 +12,7 @@ for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from finsight_agent.control_plane.planner.service import PlannerService
+from finsight_agent.control_plane.orchestrator.stage_planner import resolve_stages
 from finsight_agent.control_plane.router.service import RouterService
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
@@ -25,7 +25,6 @@ from shared.enums.stage_name import StageName
 class SemanticRoutingAndPlanningTest(unittest.TestCase):
     def setUp(self) -> None:
         self.router = RouterService()
-        self.planner = PlannerService()
 
     def test_router_classifies_metric_lookup_with_entities(self) -> None:
         result = self.router.route(
@@ -68,7 +67,25 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
         self.assertEqual(result.follow_up_type, FollowUpType.DRILLDOWN.value)
         self.assertIn("claim", result.entities)
 
-    def test_planner_builds_metric_lookup_fast_path(self) -> None:
+
+class StagePlannerTest(unittest.TestCase):
+    """覆盖 resolve_stages 的 7 种 (intent, strategy) 映射。"""
+
+    def _make_event_router_result(self) -> RouterResult:
+        return RouterResult(
+            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={
+                "event": "红海局势升级",
+                "themes": ["航运"],
+                "time_scope": "recent",
+            },
+            needs=["news_search", "concept_mapping", "rag_retrieval"],
+            constraints={"time_hint": "recent", "preferred_output": "report"},
+        )
+
+    def test_resolve_stages_metric_lookup(self) -> None:
         router_result = RouterResult(
             intent=Intent.METRIC_LOOKUP.value,
             follow_up_type=FollowUpType.NONE.value,
@@ -82,33 +99,43 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
             constraints={"preferred_output": "brief_answer"},
         )
 
-        plan = self.planner.build_plan(router_result)
+        stages, stage_constraints, response_mode = resolve_stages(router_result)
 
         self.assertEqual(
-            plan.stages,
+            stages,
             [
                 StageName.QUERY_STRUCTURED_DATA.value,
-                StageName.SYNTHESIZE_BRIEF_ANSWER.value,
+                StageName.SYNTHESIZE_ANSWER.value,
             ],
         )
-        self.assertEqual(plan.response_mode, ResponseMode.BRIEF_ANSWER.value)
-
-    def test_planner_builds_event_primary_path(self) -> None:
-        router_result = RouterResult(
-            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
-            follow_up_type=FollowUpType.NONE.value,
-            confidence="high",
-            entities={
-                "event": "红海局势升级",
-                "themes": ["航运"],
-                "time_scope": "recent",
-            },
-            needs=["news_search", "concept_mapping", "rag_retrieval"],
-            constraints={"time_hint": "recent", "preferred_output": "report"},
+        self.assertEqual(response_mode, ResponseMode.BRIEF_ANSWER.value)
+        self.assertEqual(
+            stage_constraints[StageName.SYNTHESIZE_ANSWER.value]["response_mode"],
+            ResponseMode.BRIEF_ANSWER.value,
         )
 
-        plan = self.planner.build_plan(
-            router_result,
+    def test_resolve_stages_general_finance_qa(self) -> None:
+        router_result = RouterResult(
+            intent=Intent.GENERAL_FINANCE_QA.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={},
+            needs=[],
+            constraints={},
+        )
+
+        stages, stage_constraints, response_mode = resolve_stages(router_result)
+
+        self.assertEqual(stages, [StageName.SYNTHESIZE_ANSWER.value])
+        self.assertEqual(response_mode, ResponseMode.DIRECT.value)
+        self.assertEqual(
+            stage_constraints[StageName.SYNTHESIZE_ANSWER.value]["response_mode"],
+            ResponseMode.DIRECT.value,
+        )
+
+    def test_resolve_stages_event_impact_event_primary(self) -> None:
+        stages, stage_constraints, response_mode = resolve_stages(
+            self._make_event_router_result(),
             strategy_payload={
                 "strategy": "event_primary",
                 "confidence": "high",
@@ -117,34 +144,25 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            plan.stages,
+            stages,
             [
                 StageName.COLLECT_EVENT_CONTEXT.value,
-                StageName.SYNTHESIZE_EVENT_ANSWER.value,
+                StageName.SYNTHESIZE_ANSWER.value,
             ],
         )
+        self.assertEqual(response_mode, ResponseMode.EVENT_ANSWER.value)
         self.assertEqual(
-            plan.stage_constraints["collect_event_context"]["strategy"],
+            stage_constraints[StageName.COLLECT_EVENT_CONTEXT.value]["strategy"],
             "event_primary",
         )
-        self.assertEqual(plan.response_mode, ResponseMode.BRIEF_ANSWER.value)
-
-    def test_planner_builds_disclosure_primary_path(self) -> None:
-        router_result = RouterResult(
-            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
-            follow_up_type=FollowUpType.NONE.value,
-            confidence="high",
-            entities={
-                "event": "宁德时代扩产公告",
-                "themes": ["电池"],
-                "time_scope": "recent",
-            },
-            needs=["disclosure_search", "rag_retrieval"],
-            constraints={"time_hint": "recent", "preferred_output": "report"},
+        self.assertEqual(
+            stage_constraints[StageName.SYNTHESIZE_ANSWER.value]["response_mode"],
+            ResponseMode.EVENT_ANSWER.value,
         )
 
-        plan = self.planner.build_plan(
-            router_result,
+    def test_resolve_stages_event_impact_disclosure_primary(self) -> None:
+        stages, stage_constraints, response_mode = resolve_stages(
+            self._make_event_router_result(),
             strategy_payload={
                 "strategy": "disclosure_primary",
                 "confidence": "high",
@@ -153,35 +171,26 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            plan.stages,
+            stages,
             [
                 StageName.COLLECT_EVENT_CONTEXT.value,
                 StageName.RETRIEVE_EVIDENCE.value,
-                StageName.SYNTHESIZE_REPORT.value,
+                StageName.SYNTHESIZE_ANSWER.value,
             ],
         )
+        self.assertEqual(response_mode, ResponseMode.REPORT.value)
         self.assertEqual(
-            plan.stage_constraints["collect_event_context"]["strategy"],
+            stage_constraints[StageName.COLLECT_EVENT_CONTEXT.value]["strategy"],
             "disclosure_primary",
         )
-        self.assertEqual(plan.response_mode, ResponseMode.REPORT.value)
-
-    def test_planner_builds_dual_primary_path(self) -> None:
-        router_result = RouterResult(
-            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
-            follow_up_type=FollowUpType.NONE.value,
-            confidence="high",
-            entities={
-                "event": "红海局势升级",
-                "themes": ["航运"],
-                "time_scope": "recent",
-            },
-            needs=["news_search", "concept_mapping", "rag_retrieval"],
-            constraints={"time_hint": "recent", "preferred_output": "report"},
+        self.assertEqual(
+            stage_constraints[StageName.SYNTHESIZE_ANSWER.value]["response_mode"],
+            ResponseMode.REPORT.value,
         )
 
-        plan = self.planner.build_plan(
-            router_result,
+    def test_resolve_stages_event_impact_dual_primary(self) -> None:
+        stages, stage_constraints, response_mode = resolve_stages(
+            self._make_event_router_result(),
             strategy_payload={
                 "strategy": "dual_primary",
                 "confidence": "high",
@@ -190,21 +199,25 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            plan.stages,
+            stages,
             [
                 StageName.COLLECT_EVENT_CONTEXT.value,
                 StageName.ANALYZE_TARGETS.value,
                 StageName.RETRIEVE_EVIDENCE.value,
-                StageName.SYNTHESIZE_REPORT.value,
+                StageName.SYNTHESIZE_ANSWER.value,
             ],
         )
+        self.assertEqual(response_mode, ResponseMode.REPORT.value)
         self.assertEqual(
-            plan.stage_constraints["collect_event_context"]["strategy"],
+            stage_constraints[StageName.COLLECT_EVENT_CONTEXT.value]["strategy"],
             "dual_primary",
         )
-        self.assertEqual(plan.response_mode, ResponseMode.REPORT.value)
+        self.assertEqual(
+            stage_constraints[StageName.SYNTHESIZE_ANSWER.value]["response_mode"],
+            ResponseMode.REPORT.value,
+        )
 
-    def test_planner_builds_evidence_lookup_short_plan(self) -> None:
+    def test_resolve_stages_evidence_lookup(self) -> None:
         router_result = RouterResult(
             intent=Intent.EVIDENCE_LOOKUP.value,
             follow_up_type=FollowUpType.DRILLDOWN.value,
@@ -214,72 +227,36 @@ class SemanticRoutingAndPlanningTest(unittest.TestCase):
             constraints={"preferred_output": "report", "retrieval_budget": 4},
         )
 
-        plan = self.planner.build_plan(router_result)
+        stages, stage_constraints, response_mode = resolve_stages(router_result)
 
         self.assertEqual(
-            plan.stages,
+            stages,
             [
                 StageName.RETRIEVE_EVIDENCE.value,
-                StageName.SYNTHESIZE_REPORT.value,
+                StageName.SYNTHESIZE_ANSWER.value,
             ],
         )
-        self.assertEqual(plan.response_mode, ResponseMode.REPORT.value)
-
-    def test_planner_falls_back_when_llm_plan_changes_stage_shape(self) -> None:
-        llm_payload = {
-            "plan_id": "plan_from_llm",
-            "intent": Intent.EVENT_IMPACT_ANALYSIS.value,
-            "stages": [
-                StageName.COLLECT_EVENT_CONTEXT.value,
-                StageName.RETRIEVE_EVIDENCE.value,
-                StageName.SYNTHESIZE_REPORT.value,
-            ],
-            "stage_constraints": {
-                StageName.COLLECT_EVENT_CONTEXT.value: {
-                    "time_hint": "recent",
-                    "retrieval_budget": 2,
-                },
-                StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 2},
-                StageName.SYNTHESIZE_REPORT.value: {"preferred_output": "report"},
-            },
-            "response_mode": ResponseMode.REPORT.value,
-        }
-        planner = PlannerService(llm_client=FakeLlmClient([llm_payload]))
-
-        plan = planner.build_plan(
-            RouterResult(
-                intent=Intent.EVENT_IMPACT_ANALYSIS.value,
-                follow_up_type=FollowUpType.NONE.value,
-                confidence="high",
-                entities={
-                    "event": "red sea disruption",
-                    "themes": ["shipping"],
-                    "time_scope": "recent",
-                },
-                needs=["news_search", "concept_mapping", "rag_retrieval"],
-                constraints={"time_hint": "recent", "preferred_output": "report"},
-            ),
-            strategy_payload={"strategy": "dual_primary", "confidence": "high", "reason": "test"},
-        )
-
+        self.assertEqual(response_mode, ResponseMode.REPORT.value)
         self.assertEqual(
-            plan.stages,
-            [
-                StageName.COLLECT_EVENT_CONTEXT.value,
-                StageName.ANALYZE_TARGETS.value,
-                StageName.RETRIEVE_EVIDENCE.value,
-                StageName.SYNTHESIZE_REPORT.value,
-            ],
+            stage_constraints[StageName.SYNTHESIZE_ANSWER.value]["response_mode"],
+            ResponseMode.REPORT.value,
         )
 
+    def test_resolve_stages_out_of_scope(self) -> None:
+        router_result = RouterResult(
+            intent=Intent.OUT_OF_SCOPE.value,
+            follow_up_type=FollowUpType.NONE.value,
+            confidence="high",
+            entities={},
+            needs=[],
+            constraints={},
+        )
 
-class FakeLlmClient:
-    def __init__(self, responses: list[dict]) -> None:
-        self._responses = list(responses)
+        stages, stage_constraints, response_mode = resolve_stages(router_result)
 
-    def complete_json(self, *, prompt_name: str, variables: dict[str, object]) -> dict:
-        del prompt_name, variables
-        return self._responses.pop(0)
+        self.assertEqual(stages, [])
+        self.assertEqual(response_mode, ResponseMode.BRIEF_ANSWER.value)
+        self.assertNotIn(StageName.SYNTHESIZE_ANSWER.value, stage_constraints)
 
 
 if __name__ == "__main__":

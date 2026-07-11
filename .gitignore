@@ -48,3 +48,10 @@ backend/training/finsight_agent_training/retrieval_strategy_classifier/artifacts
 *.bin
 *.safetensors
 tokenizer.json
+
+# 本地临时脚本与 smoke 测试
+/test.py
+/llm_key_smoke_test.py
+/test_bocha.py
+/demo_classifier.py
+/项目开发复盘-面试版.md

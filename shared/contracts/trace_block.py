@@ -10,7 +10,7 @@ class TraceBlock:
 
     # 共享 contract 版本，V1 固定为 v1。
     version: str = "v1"
-    # trace 区块类型，例如 routing、planning 或 retrieval。
+    # trace 区块类型，例如 routing、stage_planning 或 retrieval。
     block_type: str = ""
     # 面向前端展示的区块标题。
     title: str = ""

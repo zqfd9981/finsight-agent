@@ -64,7 +64,7 @@
 以下后端模块当前仍从 `finsight_agent.shared.*` 导入，迁移后应改为 `shared.*`：
 
 - `control_plane/router/service.py`
-- `control_plane/planner/service.py`
+- `control_plane/orchestrator/stage_planner.py`
 - `capabilities/structured_data/service.py`
 - `capabilities/reporting/service.py`
 - `shared/contracts/router_result.py`

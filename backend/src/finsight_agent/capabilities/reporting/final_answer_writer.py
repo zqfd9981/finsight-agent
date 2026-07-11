@@ -21,6 +21,7 @@ class FinalAnswerWriter:
         *,
         llm_client: LlmClient | None = None,
         system_prompt_path: Path | None = None,
+        prompt_name: str = "final_answer_writer",
     ) -> None:
         settings = load_settings()
         resolved_prompt_path = (
@@ -29,6 +30,7 @@ class FinalAnswerWriter:
         )
         self._system_prompt = resolved_prompt_path.read_text(encoding="utf-8")
         self._llm_client = llm_client or LlmClient()
+        self._prompt_name = prompt_name
 
     def write_answer(
         self,
@@ -36,7 +38,7 @@ class FinalAnswerWriter:
         final_answer_context: dict[str, object],
     ) -> FinalAnswerDraft:
         payload = self._llm_client.complete_json(
-            prompt_name="final_answer_writer",
+            prompt_name=self._prompt_name,
             variables={
                 "system_prompt": self._system_prompt,
                 "final_answer_context": final_answer_context,

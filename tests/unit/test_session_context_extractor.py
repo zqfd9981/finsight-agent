@@ -16,7 +16,6 @@ from finsight_agent.control_plane.orchestrator.models import OrchestrationResult
 from finsight_agent.control_plane.session.extractor import SessionContextExtractor
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.final_response import FinalResponse
-from shared.contracts.plan import Plan
 from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
@@ -44,17 +43,13 @@ class SessionContextExtractorTest(unittest.TestCase):
             needs=["structured_data_query"],
             constraints={"preferred_output": "brief_answer"},
         )
-        plan = Plan(
-            plan_id="plan_metric_lookup_v1",
-            intent="metric_lookup",
-            stages=["query_structured_data", "synthesize_brief_answer"],
-            stage_constraints={},
-            response_mode="brief_answer",
-        )
+        stages = ["query_structured_data", "synthesize_brief_answer"]
+        response_mode = "brief_answer"
         orchestration_result = OrchestrationResult(
             session_id="sess_metric",
             router_result=router_result,
-            plan=plan,
+            stages=stages,
+            response_mode=response_mode,
             final_response=FinalResponse(
                 response_type="brief_answer",
                 session_id="sess_metric",
@@ -66,7 +61,6 @@ class SessionContextExtractorTest(unittest.TestCase):
         context = self.extractor.extract(
             request=request,
             router_result=router_result,
-            plan=plan,
             orchestration_result=orchestration_result,
         )
 
@@ -94,17 +88,13 @@ class SessionContextExtractorTest(unittest.TestCase):
             needs=["rag_retrieval"],
             constraints={"preferred_output": "report"},
         )
-        plan = Plan(
-            plan_id="plan_evidence_lookup_v1",
-            intent="evidence_lookup",
-            stages=["retrieve_evidence", "synthesize_report"],
-            stage_constraints={},
-            response_mode="report",
-        )
+        stages = ["retrieve_evidence", "synthesize_report"]
+        response_mode = "report"
         orchestration_result = OrchestrationResult(
             session_id="sess_evidence",
             router_result=router_result,
-            plan=plan,
+            stages=stages,
+            response_mode=response_mode,
             final_response=FinalResponse(
                 response_type="report",
                 session_id="sess_evidence",
@@ -139,7 +129,6 @@ class SessionContextExtractorTest(unittest.TestCase):
         context = self.extractor.extract(
             request=request,
             router_result=router_result,
-            plan=plan,
             orchestration_result=orchestration_result,
         )
 
@@ -167,17 +156,13 @@ class SessionContextExtractorTest(unittest.TestCase):
             needs=["rag_retrieval"],
             constraints={"preferred_output": "report"},
         )
-        plan = Plan(
-            plan_id="plan_evidence_lookup_v1",
-            intent="evidence_lookup",
-            stages=["retrieve_evidence", "synthesize_report"],
-            stage_constraints={},
-            response_mode="report",
-        )
+        stages = ["retrieve_evidence", "synthesize_report"]
+        response_mode = "report"
         orchestration_result = OrchestrationResult(
             session_id="sess_limit",
             router_result=router_result,
-            plan=plan,
+            stages=stages,
+            response_mode=response_mode,
             final_response=FinalResponse(
                 response_type="report",
                 session_id="sess_limit",
@@ -211,7 +196,6 @@ class SessionContextExtractorTest(unittest.TestCase):
         context = self.extractor.extract(
             request=request,
             router_result=router_result,
-            plan=plan,
             orchestration_result=orchestration_result,
         )
 
@@ -238,17 +222,13 @@ class SessionContextExtractorTest(unittest.TestCase):
             needs=["rag_retrieval"],
             constraints={"preferred_output": "report"},
         )
-        plan = Plan(
-            plan_id="plan_evidence_lookup_v1",
-            intent="evidence_lookup",
-            stages=["retrieve_evidence", "synthesize_report"],
-            stage_constraints={},
-            response_mode="report",
-        )
+        stages = ["retrieve_evidence", "synthesize_report"]
+        response_mode = "report"
         orchestration_result = OrchestrationResult(
             session_id="sess_roll",
             router_result=router_result,
-            plan=plan,
+            stages=stages,
+            response_mode=response_mode,
             final_response=FinalResponse(
                 response_type="report",
                 session_id="sess_roll",
@@ -280,7 +260,6 @@ class SessionContextExtractorTest(unittest.TestCase):
         context = self.extractor.extract(
             request=request,
             router_result=router_result,
-            plan=plan,
             orchestration_result=orchestration_result,
             previous_context=previous_context,
         )
@@ -305,17 +284,13 @@ class SessionContextExtractorTest(unittest.TestCase):
             needs=["rag_retrieval"],
             constraints={"preferred_output": "report"},
         )
-        plan = Plan(
-            plan_id="plan_evidence_lookup_v1",
-            intent="evidence_lookup",
-            stages=["retrieve_evidence", "synthesize_report"],
-            stage_constraints={},
-            response_mode="report",
-        )
+        stages = ["retrieve_evidence", "synthesize_report"]
+        response_mode = "report"
         orchestration_result = OrchestrationResult(
             session_id="sess_roll_limit",
             router_result=router_result,
-            plan=plan,
+            stages=stages,
+            response_mode=response_mode,
             final_response=FinalResponse(
                 response_type="report",
                 session_id="sess_roll_limit",
@@ -331,7 +306,6 @@ class SessionContextExtractorTest(unittest.TestCase):
         context = self.extractor.extract(
             request=request,
             router_result=router_result,
-            plan=plan,
             orchestration_result=orchestration_result,
             previous_context=previous_context,
         )

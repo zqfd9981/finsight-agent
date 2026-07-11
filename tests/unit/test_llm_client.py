@@ -18,6 +18,20 @@ from finsight_agent.infra.llm.client import LlmClient
 
 
 class LlmClientTest(unittest.TestCase):
+    def test_init_ignores_devagi_key_as_fallback_source(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "AGICTO_API_KEY": "",
+                "FINSIGHT_LLM_API_KEY": "",
+                "DEVAGI_API_KEY": "legacy-devagi-key",
+            },
+            clear=False,
+        ):
+            client = LlmClient()
+
+        self.assertIsNone(client._api_key)
+
     def test_complete_json_returns_legacy_env_override_when_present(self) -> None:
         client = LlmClient()
 
@@ -39,17 +53,17 @@ class LlmClientTest(unittest.TestCase):
         self.assertEqual(payload["entities"], {})
 
     def test_complete_json_raises_when_api_key_missing_and_no_legacy_override(self) -> None:
-        client = LlmClient()
-
         with patch.dict(
             "os.environ",
             {
                 "FINSIGHT_ROUTER_JSON": "",
-                "DEVAGI_API_KEY": "",
+                "AGICTO_API_KEY": "",
                 "FINSIGHT_LLM_API_KEY": "",
+                "DEVAGI_API_KEY": "",
             },
             clear=False,
         ):
+            client = LlmClient()
             with self.assertRaisesRegex(RuntimeError, "api key"):
                 client.complete_json(
                     prompt_name="router",
@@ -60,8 +74,9 @@ class LlmClientTest(unittest.TestCase):
                 )
 
     @patch("finsight_agent.infra.llm.client.requests.post")
-    def test_complete_json_calls_openai_compatible_endpoint(self, post: Mock) -> None:
+    def test_complete_json_calls_agicto_openai_compatible_api(self, post: Mock) -> None:
         response = Mock()
+        response.status_code = 200
         response.json.return_value = {
             "choices": [
                 {
@@ -92,9 +107,8 @@ class LlmClientTest(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {
-                "DEVAGI_API_KEY": "test-key",
-                "FINSIGHT_LLM_BASE_URL": "https://api.fe8.cn/v1",
-                "FINSIGHT_LLM_MODEL": "gpt-4o-2024-08-06",
+                "AGICTO_API_KEY": "test-key",
+                "FINSIGHT_LLM_MODEL": "deepseek-v4-flash",
                 "FINSIGHT_ROUTER_JSON": "",
             },
             clear=False,
@@ -111,20 +125,21 @@ class LlmClientTest(unittest.TestCase):
 
         self.assertEqual(payload["intent"], "metric_lookup")
         post.assert_called_once()
-        _, kwargs = post.call_args
+        args, kwargs = post.call_args
+        # 验证 URL 指向 AGICTO OpenAI 兼容端点
+        self.assertIn("api.agicto.cn", args[0])
+        self.assertIn("/chat/completions", args[0])
+        # 验证 API key 在 Authorization header 中
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer test-key")
-        self.assertEqual(
-            kwargs["json"]["model"],
-            "gpt-4o-2024-08-06",
-        )
-        self.assertEqual(
-            kwargs["json"]["response_format"],
-            {"type": "json_object"},
-        )
-        self.assertEqual(
-            kwargs["json"]["messages"][0]["content"],
-            "Only output JSON",
-        )
+        # 验证请求体格式
+        body = kwargs["json"]
+        self.assertEqual(body["model"], "deepseek-v4-flash")
+        self.assertEqual(body["temperature"], 0)
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        # 验证 messages 结构
+        self.assertEqual(body["messages"][0]["role"], "system")
+        self.assertEqual(body["messages"][0]["content"], "Only output JSON")
+        self.assertEqual(body["messages"][1]["role"], "user")
 
 
 if __name__ == "__main__":

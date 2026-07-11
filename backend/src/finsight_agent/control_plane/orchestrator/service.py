@@ -16,7 +16,6 @@ from finsight_agent.shared.utils.execution_events import (
     get_active_run_event_emitter,
 )
 from shared.contracts.analysis_request import AnalysisRequest
-from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
 
@@ -62,14 +61,18 @@ class OrchestratorService:
         *,
         request: AnalysisRequest,
         router_result: RouterResult,
-        plan: Plan,
+        stages: list[str],
+        stage_constraints: dict[str, dict[str, object]],
+        response_mode: str = "",
         session_context: SessionContext | None,
         event_callback: EventCallback | None = None,
     ) -> OrchestrationResult:
         result = OrchestrationResult(
             session_id=request.session_id or "sess_stub",
             router_result=router_result,
-            plan=plan,
+            stages=list(stages),
+            stage_constraints=stage_constraints,
+            response_mode=response_mode,
         )
 
         emitter, owns_binding = self._resolve_event_emitter(event_callback=event_callback)
@@ -92,14 +95,14 @@ class OrchestratorService:
         def _run() -> OrchestrationResult:
             nonlocal owned_retrieval_facade
             try:
-                for stage_name in plan.stages:
+                for stage_name in stages:
                     runner = STAGE_RUNNERS[stage_name]
-                    stage_constraints = plan.stage_constraints.get(stage_name, {})
+                    stage_constraints_for_stage = stage_constraints.get(stage_name, {})
                     runner_kwargs = {
                         "request": request,
                         "router_result": router_result,
                         "execution_state": execution_state,
-                        "stage_constraints": stage_constraints,
+                        "stage_constraints": stage_constraints_for_stage,
                     }
                     if stage_name == "query_structured_data":
                         runner_kwargs["structured_data_service"] = self._structured_data_service
@@ -121,11 +124,7 @@ class OrchestratorService:
                         runner_kwargs[
                             "target_analysis_service"
                         ] = self._target_analysis_service
-                    elif stage_name in {
-                        "synthesize_brief_answer",
-                        "synthesize_event_answer",
-                        "synthesize_report",
-                    }:
+                    elif stage_name == "synthesize_answer":
                         runner_kwargs["reporting_service"] = self._reporting_service
                     elif stage_name == "retrieve_evidence":
                         retrieval_facade, is_owned = self._resolve_retrieval_facade(
@@ -159,7 +158,7 @@ class OrchestratorService:
                             input_summary={
                                 "query": request.query,
                                 "intent": router_result.intent,
-                                "stage_constraints": stage_constraints,
+                                "stage_constraints": stage_constraints_for_stage,
                             },
                             stage_result=stage_result,
                         )

@@ -129,58 +129,78 @@
 }
 ```
 
-## 5. `Plan`
+## 5. `stage_planner` 输出 `(stages, stage_constraints, response_mode)`
+
+> 历史说明：原 `Plan` 契约（`shared/contracts/plan.py`）已在控制面重构中删除，stage 编排职责迁移到 orchestrator 层的 `stage_planner.resolve_stages` 纯查表函数。以下描述该函数的输出约定。
 
 ### 5.1 Owner / Producer / Consumer
 
-- Owner：`semantic-routing-and-planning`
-- Producers：planner
-- Consumers：orchestrator、trace layer
+- Owner：`event-analysis-orchestration`
+- Producers：`orchestrator/stage_planner.py` 的 `resolve_stages` 函数
+- Consumers：`orchestrator/service.py` 的 `execute` 方法
 
-### 5.2 必填字段
+### 5.2 输出结构
 
-| 字段 | 类型 | 含义 |
+`resolve_stages` 返回一个三元组 `(stages, stage_constraints, response_mode)`，不再以独立契约形式跨模块传递，仅在 orchestrator 内部消费：
+
+| 元素 | 类型 | 含义 |
 | --- | --- | --- |
-| `version` | string | contract 版本 |
-| `plan_id` | string | 计划唯一标识 |
-| `intent` | string | 与 `RouterResult.intent` 对齐 |
-| `stages` | array | 有序阶段列表，允许长路径与短路径 |
-| `stage_constraints` | object | 分阶段执行约束 |
-| `response_mode` | string | 最终响应模式，如 `report / brief_answer` |
+| `stages` | `list[str]` | 有序阶段列表，允许长路径与短路径 |
+| `stage_constraints` | `dict[str, dict]` | 分阶段执行约束，key 为 stage 名 |
+| `response_mode` | `str` | 最终响应模式：`direct / brief_answer / event_answer / report` |
 
 ### 5.3 V1 阶段约定
 
-- `event_impact_analysis` 默认走四阶段主链路：`collect_event_context`、`analyze_targets`、`retrieve_evidence`、`synthesize_report`
-- `evidence_lookup` 允许跳过 `collect_event_context` 和 `analyze_targets`
-- `metric_lookup` 允许使用短路径：`query_structured_data`、`synthesize_brief_answer`
-- 顶层 `stages` 只能从当前 V1 已约定的阶段名中取值，不允许临时发明新的顶层阶段
+V1 共 5 个正式 stage（guardrail 短路不算 stage）：
+
+- `query_structured_data`
+- `collect_event_context`
+- `analyze_targets`
+- `retrieve_evidence`
+- `synthesize_answer`
+
+`(intent, strategy)` → `stages` 映射：
+
+| intent | strategy | stages | response_mode |
+| --- | --- | --- | --- |
+| `metric_lookup` | - | `query_structured_data → synthesize_answer` | `brief_answer` |
+| `general_finance_qa` | - | `synthesize_answer` | `direct` |
+| `event_impact_analysis` | `event_primary` | `collect_event_context → synthesize_answer` | `event_answer` |
+| `event_impact_analysis` | `disclosure_primary` | `collect_event_context → retrieve_evidence → synthesize_answer` | `report` |
+| `event_impact_analysis` | `dual_primary` | `collect_event_context → analyze_targets → retrieve_evidence → synthesize_answer` | `report` |
+| `evidence_lookup` | - | `retrieve_evidence → synthesize_answer` | `report` |
+| `out_of_scope` | - | guardrail 短路 | - |
+
+顶层 `stages` 只能从当前 V1 已约定的阶段名中取值，不允许临时发明新的顶层阶段。
 
 ### 5.4 降级语义
 
-- 超范围任务不生成常规四阶段计划
-- 允许生成缩减版计划，但必须显式说明跳过了哪些阶段
+- 超范围任务不生成常规 stage 列表，走 guardrail 短路
+- 允许生成缩减版 stage 列表（如 `evidence_lookup` 跳过 `collect_event_context` 和 `analyze_targets`），但必须由查表函数显式输出
 - 不允许把局部 step 内部动作伪装成顶层 stage
 
-### 5.5 Mock Payload：事件影响分析
+### 5.5 Mock Payload：事件影响分析（dual_primary）
 
 ```json
 {
-  "version": "v1",
-  "plan_id": "plan_001",
-  "intent": "event_impact_analysis",
   "stages": [
     "collect_event_context",
     "analyze_targets",
     "retrieve_evidence",
-    "synthesize_report"
+    "synthesize_answer"
   ],
   "stage_constraints": {
     "collect_event_context": {
       "time_hint": "recent",
-      "retrieval_budget": 3
+      "retrieval_budget": 3,
+      "strategy": "dual_primary"
     },
     "retrieve_evidence": {
       "retrieval_budget": 4
+    },
+    "synthesize_answer": {
+      "response_mode": "report",
+      "preferred_output": "report"
     }
   },
   "response_mode": "report"
@@ -191,18 +211,16 @@
 
 ```json
 {
-  "version": "v1",
-  "plan_id": "plan_002",
-  "intent": "metric_lookup",
   "stages": [
     "query_structured_data",
-    "synthesize_brief_answer"
+    "synthesize_answer"
   ],
   "stage_constraints": {
     "query_structured_data": {
       "time_hint": "2024_annual"
     },
-    "synthesize_brief_answer": {
+    "synthesize_answer": {
+      "response_mode": "brief_answer",
       "preferred_output": "brief_answer"
     }
   },
@@ -216,7 +234,7 @@
 
 - Owner：`conversation-session-state`
 - Producers：session manager
-- Consumers：router、planner、workbench
+- Consumers：router、orchestrator (stage_planner)、workbench
 
 ### 6.2 必填字段
 

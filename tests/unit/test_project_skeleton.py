@@ -77,7 +77,6 @@ class ProjectSkeletonTest(unittest.TestCase):
             "frontend/streamlit_app/config_resolver.py",
             "frontend/streamlit_app/streamlit_entry.py",
             "shared/contracts/router_result.py",
-            "shared/contracts/plan.py",
             "shared/contracts/session_context.py",
             "shared/contracts/stage_observation.py",
             "shared/contracts/evidence_bundle.py",
@@ -89,7 +88,6 @@ class ProjectSkeletonTest(unittest.TestCase):
             "shared/enums/intent.py",
             "shared/enums/stage_name.py",
             "backend/src/finsight_agent/control_plane/router/service.py",
-            "backend/src/finsight_agent/control_plane/planner/service.py",
             "backend/src/finsight_agent/control_plane/session/models.py",
             "backend/src/finsight_agent/control_plane/session/repository.py",
             "backend/src/finsight_agent/control_plane/session/service.py",
@@ -101,7 +99,6 @@ class ProjectSkeletonTest(unittest.TestCase):
             "config/logging.yaml",
             "config/retrieval.yaml",
             "fixtures/contracts/router_result.metric_lookup.json",
-            "fixtures/contracts/plan.metric_lookup.json",
             "fixtures/contracts/final_response.success.json",
             "fixtures/contracts/analysis_request.first_turn.json",
             "fixtures/contracts/analysis_request.follow_up.json",
@@ -133,7 +130,6 @@ class ProjectSkeletonTest(unittest.TestCase):
         from shared.contracts.guardrail_or_error_response import (
             GuardrailOrErrorResponse,
         )
-        from shared.contracts.plan import Plan
         from shared.contracts.router_result import RouterResult
         from shared.contracts.session_context import SessionContext
         from shared.contracts.stage_observation import StageObservation
@@ -142,7 +138,6 @@ class ProjectSkeletonTest(unittest.TestCase):
         from shared.enums.stage_name import StageName
 
         self.assertEqual(RouterResult().version, "v1")
-        self.assertEqual(Plan().version, "v1")
         self.assertEqual(SessionContext().version, "v1")
         self.assertEqual(StageObservation().version, "v1")
         self.assertEqual(EvidenceBundle().version, "v1")

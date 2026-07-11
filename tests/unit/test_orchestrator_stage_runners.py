@@ -414,8 +414,8 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertIn("CATL", result.user_summary or "")
 
     def test_synthesize_brief_answer_stage_builds_final_response(self) -> None:
-        from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_brief_answer import (
-            run_synthesize_brief_answer_stage,
+        from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_answer import (
+            run_synthesize_answer_stage,
         )
 
         execution_state = {
@@ -433,15 +433,18 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
             )
         }
 
-        result = run_synthesize_brief_answer_stage(
+        result = run_synthesize_answer_stage(
             request=_build_request(session_id="sess_brief"),
             router_result=_build_router_result(),
-            stage_constraints={"preferred_output": "brief_answer"},
+            stage_constraints={
+                "response_mode": "brief_answer",
+                "preferred_output": "brief_answer",
+            },
             execution_state=execution_state,
             reporting_service=ReportingService(),
         )
 
-        self.assertEqual(result.stage_name, "synthesize_brief_answer")
+        self.assertEqual(result.stage_name, "synthesize_answer")
         self.assertEqual(result.status, "success")
         final_response = result.output_payload["final_response"]
         self.assertEqual(final_response.session_id, "sess_brief")
@@ -450,8 +453,8 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         self.assertIn("123.45", final_response.summary)
 
     def test_synthesize_event_answer_stage_builds_final_response(self) -> None:
-        from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_event_answer import (
-            run_synthesize_event_answer_stage,
+        from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_answer import (
+            run_synthesize_answer_stage,
         )
 
         execution_state = {
@@ -471,18 +474,21 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
             )
         }
 
-        result = run_synthesize_event_answer_stage(
+        result = run_synthesize_answer_stage(
             request=_build_request(
                 query="What changed in the Red Sea disruption background?",
                 session_id="sess_event",
             ),
             router_result=_build_router_result(intent="event_impact_analysis"),
-            stage_constraints={"preferred_output": "brief_answer"},
+            stage_constraints={
+                "response_mode": "event_answer",
+                "preferred_output": "brief_answer",
+            },
             execution_state=execution_state,
             reporting_service=ReportingService(),
         )
 
-        self.assertEqual(result.stage_name, "synthesize_event_answer")
+        self.assertEqual(result.stage_name, "synthesize_answer")
         self.assertEqual(result.status, "success")
         final_response = result.output_payload["final_response"]
         self.assertEqual(final_response.session_id, "sess_event")
@@ -622,8 +628,8 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
         )
 
     def test_synthesize_report_stage_builds_report_response_from_retrieval_result(self) -> None:
-        from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_report import (
-            run_synthesize_report_stage,
+        from finsight_agent.control_plane.orchestrator.stage_runners.synthesize_answer import (
+            run_synthesize_answer_stage,
         )
 
         retrieval_result = _build_retrieval_result()
@@ -636,18 +642,21 @@ class OrchestratorStageRunnersTest(unittest.TestCase):
             )
         }
 
-        result = run_synthesize_report_stage(
+        result = run_synthesize_answer_stage(
             request=_build_request(
                 query="What evidence do we have?",
                 session_id="sess_report",
             ),
             router_result=_build_router_result(intent="evidence_lookup"),
-            stage_constraints={"preferred_output": "report"},
+            stage_constraints={
+                "response_mode": "report",
+                "preferred_output": "report",
+            },
             execution_state=execution_state,
             reporting_service=ReportingService(),
         )
 
-        self.assertEqual(result.stage_name, "synthesize_report")
+        self.assertEqual(result.stage_name, "synthesize_answer")
         self.assertEqual(result.status, "success")
         final_response = result.output_payload["final_response"]
         self.assertEqual(final_response.session_id, "sess_report")

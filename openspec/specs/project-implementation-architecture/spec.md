@@ -45,7 +45,7 @@
 
 #### Scenario: 映射 capability spec 到后端代码目录
 - **WHEN** 开发者需要根据现有 capability spec 创建后端运行时代码目录
-- **THEN** 项目 MUST 允许将 `semantic-routing-and-planning` 映射到 `backend/src/finsight_agent/control_plane/router/` 与 `backend/src/finsight_agent/control_plane/planner/`，将 `event-analysis-orchestration` 映射到 `backend/src/finsight_agent/control_plane/orchestrator/`，将 `structured-market-data-support`、`evidence-retrieval-pipeline`、`report-trace-and-evaluation` 分别映射到 `backend/src/finsight_agent/capabilities/` 下的对应目录，而不是强制一比一建立 7 个长目录名
+- **THEN** 项目 MUST 允许将 `semantic-routing-and-planning` 映射到 `backend/src/finsight_agent/control_plane/router/`，将 `event-analysis-orchestration` 映射到 `backend/src/finsight_agent/control_plane/orchestrator/`（含 `stage_planner.py` 查表函数），将 `structured-market-data-support`、`evidence-retrieval-pipeline`、`report-trace-and-evaluation` 分别映射到 `backend/src/finsight_agent/capabilities/` 下的对应目录，而不是强制一比一建立 7 个长目录名
 
 #### Scenario: 技术入口与业务实现分离
 - **WHEN** 项目创建 FastAPI 后端入口和 V1 工作台入口
@@ -101,8 +101,8 @@
 
 #### Scenario: 开始第一轮真正代码实现
 - **WHEN** 项目进入采用前后端工程层方案的第一轮代码开发
-- **THEN** 第一批骨架 MUST 至少为顶层 `shared/contracts/`、`shared/enums/`、`frontend/streamlit_app/`、`backend/src/finsight_agent/control_plane/router/`、`backend/src/finsight_agent/control_plane/planner/`、`backend/src/finsight_agent/capabilities/structured_data/` 和 `backend/src/finsight_agent/capabilities/reporting/` 留出明确目录与文件位置
+- **THEN** 第一批骨架 MUST 至少为顶层 `shared/contracts/`、`shared/enums/`、`frontend/streamlit_app/`、`backend/src/finsight_agent/control_plane/router/`、`backend/src/finsight_agent/control_plane/orchestrator/`（含 `stage_planner.py`）、`backend/src/finsight_agent/capabilities/structured_data/` 和 `backend/src/finsight_agent/capabilities/reporting/` 留出明确目录与文件位置
 
 #### Scenario: 后续扩展完整事件分析链路
 - **WHEN** 项目从简单快路径扩展到 `event_impact_analysis`
-- **THEN** 现有工程层与后端实现层结构 MUST 能在不推翻 `frontend/`、`backend/` 与 `shared/` 边界的前提下，继续容纳 `collect_event_context`、`analyze_targets`、`retrieve_evidence` 和 `synthesize_report`
+- **THEN** 现有工程层与后端实现层结构 MUST 能在不推翻 `frontend/`、`backend/` 与 `shared/` 边界的前提下，继续容纳 `collect_event_context`、`analyze_targets`、`retrieve_evidence` 和 `synthesize_answer`

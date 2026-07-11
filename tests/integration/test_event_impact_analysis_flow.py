@@ -24,12 +24,9 @@ from finsight_agent.control_plane.session.repository import SessionRepository
 from finsight_agent.control_plane.session.service import SessionService
 from finsight_agent.workbench_backend_api.service import WorkbenchBackendApiService
 from shared.contracts.analysis_request import AnalysisRequest
-from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.enums.follow_up_type import FollowUpType
 from shared.enums.intent import Intent
-from shared.enums.response_mode import ResponseMode
-from shared.enums.stage_name import StageName
 
 
 class _StubRouterService:
@@ -67,66 +64,6 @@ class _StubStrategyClassifier:
             "confidence": "high",
             "reason": "test_classifier",
         }
-
-
-class _StubPlannerService:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def build_plan(
-        self,
-        router_result: RouterResult,
-        strategy_payload: dict[str, str] | None = None,
-    ) -> Plan:
-        self.calls.append(
-            {
-                "router_result": router_result,
-                "strategy_payload": strategy_payload,
-            }
-        )
-        strategy = (strategy_payload or {}).get("strategy", "event_primary")
-        if strategy == "dual_primary":
-            stages = [
-                StageName.COLLECT_EVENT_CONTEXT.value,
-                StageName.ANALYZE_TARGETS.value,
-                StageName.RETRIEVE_EVIDENCE.value,
-                StageName.SYNTHESIZE_REPORT.value,
-            ]
-            stage_constraints = {
-                StageName.COLLECT_EVENT_CONTEXT.value: {
-                    "retrieval_budget": 3,
-                    "strategy": "dual_primary",
-                },
-                StageName.ANALYZE_TARGETS.value: {"candidate_discovery_budget": 1},
-                StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 4},
-                StageName.SYNTHESIZE_REPORT.value: {"preferred_output": "report"},
-            }
-            response_mode = ResponseMode.REPORT.value
-            plan_id = "plan_event_impact_analysis_dual_primary_v1"
-        else:
-            stages = [
-                StageName.COLLECT_EVENT_CONTEXT.value,
-                StageName.SYNTHESIZE_EVENT_ANSWER.value,
-            ]
-            stage_constraints = {
-                StageName.COLLECT_EVENT_CONTEXT.value: {
-                    "retrieval_budget": 3,
-                    "strategy": strategy,
-                },
-                StageName.SYNTHESIZE_EVENT_ANSWER.value: {
-                    "preferred_output": "brief_answer"
-                },
-            }
-            response_mode = ResponseMode.BRIEF_ANSWER.value
-            plan_id = "plan_event_impact_analysis_event_primary_v1"
-
-        return Plan(
-            plan_id=plan_id,
-            intent=Intent.EVENT_IMPACT_ANALYSIS.value,
-            stages=stages,
-            stage_constraints=stage_constraints,
-            response_mode=response_mode,
-        )
 
 
 class _StubRetrievalFacade:
@@ -261,11 +198,9 @@ class EventImpactAnalysisFlowIntegrationTest(unittest.TestCase):
     def test_event_impact_analysis_uses_classifier_before_planning_and_returns_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             classifier = _StubStrategyClassifier(strategy="dual_primary")
-            planner = _StubPlannerService()
             external_context_retriever = _StubExternalContextRetriever()
             workbench_service = WorkbenchBackendApiService(
                 router_service=_StubRouterService(),
-                planner_service=planner,
                 orchestrator_service=OrchestratorService(
                     retrieval_facade=_StubRetrievalFacade(),
                     external_context_retriever=external_context_retriever,
@@ -290,10 +225,9 @@ class EventImpactAnalysisFlowIntegrationTest(unittest.TestCase):
         self.assertEqual(envelope.response.report_blocks[0]["block_type"], "evidence_overview")
         self.assertEqual(
             [block.block_type for block in envelope.trace_blocks],
-            ["routing", "planning", "execution"],
+            ["routing", "stage_planning", "execution"],
         )
         self.assertEqual(classifier.calls[0]["router_payload"]["intent"], "event_impact_analysis")
-        self.assertEqual(planner.calls[0]["strategy_payload"]["strategy"], "dual_primary")
         self.assertEqual(external_context_retriever.event_calls[0]["strategy"], "dual_primary")
         self.assertEqual(
             envelope.trace_blocks[1].payload_summary["stages"],
@@ -301,7 +235,7 @@ class EventImpactAnalysisFlowIntegrationTest(unittest.TestCase):
                 "collect_event_context",
                 "analyze_targets",
                 "retrieve_evidence",
-                "synthesize_report",
+                "synthesize_answer",
             ],
         )
         self.assertEqual(envelope.trace_blocks[1].payload_summary["strategy"], "dual_primary")

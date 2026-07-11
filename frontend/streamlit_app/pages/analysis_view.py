@@ -22,7 +22,7 @@ from shared.contracts.analysis_stream_event import AnalysisStreamEvent
 
 STAGE_LABELS = {
     "routing": "Routing",
-    "planning": "Planning",
+    "stage_planning": "Stage Planning",
     "collect_event_context": "Collect event context",
     "analyze_targets": "Analyze targets",
     "rerank": "Rerank",

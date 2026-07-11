@@ -1,23 +1,9 @@
-## Purpose
+## REMOVED Requirements
 
-定义 FinSight Agent V1 的任务理解能力，包括语义路由、追问类型判别和步骤级约束表达。
+- `Planner 输出稳定的 V1 计划骨架`
+- `Planner 显式编码步骤约束`
 
-## 重点关注
-
-- 输入问题的 intent 判别、follow-up type 判别与 stage 约束表达
-- 步骤级约束如何被显式编码，而不是埋在自由文本里
-
-## 非职责范围
-
-- 不直接执行结构化数据查询与文档检索
-- 不负责最终报告编写与前端展示
-
-## 上下游关系
-
-- 上游输入：query、`session_context`
-- 下游输出：router result、follow-up type、stage constraints
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 语义路由输出结构化意图结果
 系统 MUST 将每一个输入问题分类为结构化的 router 结果，并把 intent、语义对象和执行需求分层表达。
@@ -52,6 +38,8 @@
 #### Scenario: Redirect 触发重新规划
 - **WHEN** 用户在同一会话中切换到一个实质不同的话题
 - **THEN** router 必须把 follow-up type 标记为 `redirect`，并输出允许 orchestrator 重新解析 stage 列表的结果
+
+## ADDED Requirements
 
 ### Requirement: Orchestrator 通过查表解析 stage 列表
 系统 MUST 通过纯查表函数将 (intent, strategy) 映射为 (stages, stage_constraints, response_mode)，不调用 LLM。查表函数吸收原 planner 的 stage 编排职责，router 只做意图识别，classifier 只对 `event_impact_analysis` 做 strategy 三分类。

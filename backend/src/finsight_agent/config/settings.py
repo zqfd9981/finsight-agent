@@ -12,7 +12,6 @@ class PromptSettings:
     """Control-plane prompt file path configuration."""
 
     router_system_prompt_path: Path
-    planner_system_prompt_path: Path
 
 
 @dataclass(slots=True)
@@ -105,10 +104,6 @@ def load_settings() -> AppSettings:
                 router_system_prompt_path=_resolve_path(
                     control_plane_root,
                     _require_text(control_plane_prompts, "router_system_prompt_path"),
-                ),
-                planner_system_prompt_path=_resolve_path(
-                    control_plane_root,
-                    _require_text(control_plane_prompts, "planner_system_prompt_path"),
                 ),
             ),
         ),

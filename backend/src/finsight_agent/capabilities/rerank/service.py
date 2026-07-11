@@ -134,7 +134,7 @@ class _LazySequenceReranker:
 
 class _LlmJsonReranker:
     def __init__(self) -> None:
-        self._client = LlmClient(timeout_seconds=120)
+        self._client = LlmClient()
 
     @property
     def available(self) -> bool:

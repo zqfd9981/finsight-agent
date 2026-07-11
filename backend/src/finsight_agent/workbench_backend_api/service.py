@@ -15,10 +15,10 @@ from finsight_agent.control_plane.orchestrator.retrieval_strategy_classifier imp
     StubRetrievalStrategyClassifier,
 )
 from finsight_agent.control_plane.orchestrator.service import OrchestratorService
+from finsight_agent.control_plane.orchestrator.stage_planner import resolve_stages
 from finsight_agent.control_plane.orchestrator.trained_strategy_classifier import (
     TrainedRetrievalStrategyClassifier,
 )
-from finsight_agent.control_plane.planner.service import PlannerService
 from finsight_agent.control_plane.router.service import RouterService
 from finsight_agent.control_plane.session.service import SessionService
 from finsight_agent.shared.utils.execution_events import (
@@ -29,19 +29,17 @@ from finsight_agent.shared.utils.execution_events import (
 
 
 class WorkbenchBackendApiService:
-    """Unified route -> classify -> plan -> orchestrate entrypoint."""
+    """Unified route -> classify -> stage-plan -> orchestrate entrypoint."""
 
     def __init__(
         self,
         *,
         router_service: RouterService | None = None,
-        planner_service: PlannerService | None = None,
         orchestrator_service: OrchestratorService | None = None,
         session_service: SessionService | None = None,
         retrieval_strategy_classifier=None,
     ) -> None:
         self._router_service = router_service or RouterService()
-        self._planner_service = planner_service or PlannerService()
         self._orchestrator_service = orchestrator_service or OrchestratorService()
         self._session_service = session_service or SessionService()
         self._retrieval_strategy_classifier = (
@@ -124,18 +122,18 @@ class WorkbenchBackendApiService:
                     },
                 )
 
-                current_stage_name = "planning"
+                current_stage_name = "stage_planning"
                 current_stage_started_at = self._emit_stage_started(
                     emitter=emitter,
                     stage_name=current_stage_name,
-                    message="Planning started",
+                    message="Stage planning started",
                 )
                 strategy_payload = self._classify_event_strategy(
                     query=request.query,
                     router_result=router_result,
                     session_context=session_context,
                 )
-                plan = self._planner_service.build_plan(
+                stages, stage_constraints, response_mode = resolve_stages(
                     router_result,
                     strategy_payload=strategy_payload,
                 )
@@ -144,11 +142,11 @@ class WorkbenchBackendApiService:
                     stage_name=current_stage_name,
                     started_at=current_stage_started_at,
                     status="success",
-                    message="Planning finished",
+                    message="Stage planning finished",
                     payload={
-                        "plan_id": plan.plan_id,
-                        "intent": plan.intent,
-                        "stages": list(plan.stages),
+                        "intent": router_result.intent,
+                        "stages": list(stages),
+                        "response_mode": response_mode,
                         "strategy": (
                             strategy_payload.get("strategy", "")
                             if strategy_payload is not None
@@ -169,7 +167,9 @@ class WorkbenchBackendApiService:
                 orchestration_result = self._orchestrator_service.execute(
                     request=normalized_request,
                     router_result=router_result,
-                    plan=plan,
+                    stages=stages,
+                    stage_constraints=stage_constraints,
+                    response_mode=response_mode,
                     session_context=session_context,
                     event_callback=event_callback,
                 )
@@ -177,7 +177,7 @@ class WorkbenchBackendApiService:
                 snapshot = self._session_service.build_snapshot(
                     request=normalized_request,
                     router_result=router_result,
-                    plan=plan,
+                    stages=stages,
                     orchestration_result=orchestration_result,
                 )
                 if snapshot is not None:
@@ -193,7 +193,8 @@ class WorkbenchBackendApiService:
                     trace_blocks=self._build_trace_blocks(
                         request=request,
                         router_result=router_result,
-                        plan=plan,
+                        stages=stages,
+                        response_mode=response_mode,
                         orchestration_result=orchestration_result,
                         strategy_payload=strategy_payload,
                     ),
@@ -221,7 +222,8 @@ class WorkbenchBackendApiService:
         *,
         request: AnalysisRequest,
         router_result,
-        plan,
+        stages: list[str],
+        response_mode: str,
         orchestration_result,
         strategy_payload: dict[str, str] | None,
     ) -> list[TraceBlock]:
@@ -242,24 +244,24 @@ class WorkbenchBackendApiService:
                 raw_refs=[router_result.intent],
             )
         )
-        planning_summary = {
-            "plan_id": plan.plan_id,
-            "intent": plan.intent,
-            "stage_count": len(plan.stages),
-            "stages": list(plan.stages),
+        stage_planning_summary = {
+            "intent": router_result.intent,
+            "stage_count": len(stages),
+            "stages": list(stages),
+            "response_mode": response_mode,
         }
         if strategy_payload is not None:
-            planning_summary["strategy"] = strategy_payload.get("strategy", "")
-            planning_summary["strategy_confidence"] = strategy_payload.get(
+            stage_planning_summary["strategy"] = strategy_payload.get("strategy", "")
+            stage_planning_summary["strategy_confidence"] = strategy_payload.get(
                 "confidence", ""
             )
         trace_blocks.append(
             TraceBlock(
-                block_type="planning",
-                title="计划结果",
+                block_type="stage_planning",
+                title="阶段计划结果",
                 status="success",
-                payload_summary=planning_summary,
-                raw_refs=list(plan.stages),
+                payload_summary=stage_planning_summary,
+                raw_refs=list(stages),
             )
         )
         trace_blocks.extend(orchestration_result.trace_blocks)

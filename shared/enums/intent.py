@@ -7,4 +7,5 @@ class Intent(str, Enum):
     METRIC_LOOKUP = "metric_lookup"
     EVENT_IMPACT_ANALYSIS = "event_impact_analysis"
     EVIDENCE_LOOKUP = "evidence_lookup"
+    GENERAL_FINANCE_QA = "general_finance_qa"
     OUT_OF_SCOPE = "out_of_scope"

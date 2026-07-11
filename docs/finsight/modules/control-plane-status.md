@@ -1,8 +1,8 @@
 # 控制面状态
 
-日期：2026-07-07
+日期：2026-07-09
 当前状态：进行中
-阶段结论：控制面已完成三类主链的首版真实编排，并已具备事件样本回放能力，当前重点从“主链接线”转向“检索质量、分类器与评测增强”。
+阶段结论：控制面已完成三类主链的首版真实编排，并已具备事件样本回放能力，当前重点从“主链接线”转向“检索质量、分类器与评测增强”；控制面已完成 planner 合并 + synthesize 精简 + 泛财经轻路径重构。
 
 ## 模块范围
 
@@ -12,27 +12,20 @@
 
 ## 当前能力
 
-### 1. Router / Planner
+### 1. Router / Classifier / Orchestrator
 
-- `RouterService` 已稳定输出：
-  - `metric_lookup`
-  - `evidence_lookup`
-  - `event_impact_analysis`
-  - `out_of_scope`
-- `PlannerService` 已稳定输出：
-  - `metric_lookup` 两阶段计划
-  - `evidence_lookup` 两阶段计划
-  - `event_impact_analysis` 四阶段计划
+- `RouterService` 已稳定输出 5 个 intent：metric_lookup / event_impact_analysis / evidence_lookup / general_finance_qa / out_of_scope
+- classifier（仅 event_impact_analysis 触发）已稳定输出 3 类 strategy：event_primary / disclosure_primary / dual_primary
+- orchestrator 的 `stage_planner.resolve_stages` 纯查表函数已替代原 PlannerService，输出 (stages, stage_constraints, response_mode)
 
 ### 2. Orchestrator
 
 - `OrchestratorService` 已稳定执行：
   - `query_structured_data`
-  - `synthesize_brief_answer`
   - `collect_event_context`
   - `analyze_targets`
   - `retrieve_evidence`
-  - `synthesize_report`
+  - `synthesize_answer`
 - 已支持：
   - `out_of_scope` 短路
   - `StageObservation`
@@ -89,11 +82,19 @@
   - 新增护栏测试 `test_no_gdelt_references_in_production.py` 扫描 `backend/src/finsight_agent/` 防 GDELT 回潮
   - 新增根目录 `test_bocha.py` 冒烟脚本（不进 CI）
 
+### 控制面重构成果
+
+- 删除 planner 层，stage 编排职责合并入 orchestrator 的 `resolve_stages` 查表函数
+- 3 个 synthesize_* stage 合并为 1 个 `synthesize_answer`，按 `response_mode` 分发
+- 新增 `general_finance_qa` 轻路径，泛财经常识问题走 LLM 直答
+- 收紧 `out_of_scope`，只对投资建议/荐股/股价预测触发
+- 新增 4 个 reporting prompt 模板 + reporting service 统一 `build_response` 入口
+
 ## 活跃任务状态
 
 | 任务 | 状态 | 说明 |
 | --- | --- | --- |
-| `semantic-routing-and-planning` 首版规则实现 | 已完成 | 已稳定驱动真实主链 |
+| `semantic-routing-and-planning` 首版规则实现 | 已完成 | 已稳定驱动真实主链，planner 已合并入 orchestrator |
 | `SessionContext` 首版真实接线 | 已完成 | follow-up 已可真实续接 |
 | `event_impact_analysis` 首版四阶段接线 | 已完成 | 事件链可真实执行 |
 | 双层外部上下文检索接入 | 已完成首版 | 已接入 Bocha（替换原 GDELT）+ 官方披露搜索；新增 `EventSearchProvider` Protocol 抽象边界 |
@@ -101,13 +102,15 @@
 | Streamlit 调试/评测工作台 | 已完成首版 | 已具备分析、调试、评测三视图骨架 |
 | 检索策略分类器训练 | 未开始实现 | 已单独拆成训练子项目，不阻塞主链 |
 | 事件分析评测集扩展 | 进行中 | 已有首版基线，后续继续补样本与误判场景 |
+| `general_finance_qa` 轻路径 | 已完成 | 泛财经常识问题走 LLM 直答 |
 
 ## 当前风险
 
-1. `RetrievalStrategyClassifier` 仍是 stub/fallback，真实小模型分类尚未接入主流程。
+1. classifier 已升级到 StructBERT 微调模型（93.18% test acc），但边界样本仍可优化。
 2. 双层外部检索虽然已建立 replay 基线，但样本规模和弱结果覆盖仍不足。
 3. `analyze_targets` 已可批量回放，但目标发现质量仍需更多真实事件样本观察。
 4. 事件搜索单点依赖博查：未做重试 / 缓存 / 熔断；key 缺失或 429 限流时降级到披露源 + 本地 RAG，事件背景可能偏薄；详见 [operations/workbench-runbook.md §5.2](../operations/workbench-runbook.md)。
+5. general_finance_qa 路由边界需持续观察。
 
 ## 下一步建议
 

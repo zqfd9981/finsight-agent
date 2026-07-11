@@ -4,7 +4,6 @@ import re
 
 from finsight_agent.control_plane.orchestrator.models import OrchestrationResult
 from shared.contracts.analysis_request import AnalysisRequest
-from shared.contracts.plan import Plan
 from shared.contracts.report_block import EvidenceOverviewBlock
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
@@ -22,11 +21,10 @@ class SessionContextExtractor:
         *,
         request: AnalysisRequest,
         router_result: RouterResult,
-        plan: Plan,
         orchestration_result: OrchestrationResult,
         previous_context: SessionContext | None = None,
     ) -> SessionContext:
-        del request, plan
+        del request
 
         active_topic = self._build_active_topic(router_result, orchestration_result)
         active_candidates = self._build_active_candidates(

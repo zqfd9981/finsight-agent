@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,26 +18,40 @@ class LlmRequest:
 
 
 class LlmClient:
-    """Structured JSON LLM adapter with legacy fixture fallback."""
+    """基于 AGICTO (OpenAI 兼容) 的结构化 JSON LLM 适配器。
+
+    通过 https://api.agicto.cn/v1/chat/completions 调用，
+    使用 response_format=json_object 强制 JSON 输出。
+    内置重试以应对临时性错误（429/5xx/网络抖动）。
+
+    保留 legacy fixture 机制以支持无网络的单元测试：
+      FINSIGHT_<PROMPT_NAME>_JSON 环境变量存在时直接返回该 JSON。
+    """
+
+    _API_BASE = "https://api.agicto.cn/v1"
 
     def __init__(
         self,
         *,
-        base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        max_tokens: int | None = None,
+        max_retries: int | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        self._base_url = (
-            (base_url or os.getenv("FINSIGHT_LLM_BASE_URL") or "https://api.fe8.cn/v1")
-            .rstrip("/")
-        )
         self._api_key = (
             api_key
+            or os.getenv("AGICTO_API_KEY")
             or os.getenv("FINSIGHT_LLM_API_KEY")
-            or os.getenv("DEVAGI_API_KEY")
+            or None
         )
-        self._model = model or os.getenv("FINSIGHT_LLM_MODEL") or "gpt-4o"
+        self._model = model or os.getenv("FINSIGHT_LLM_MODEL") or "deepseek-v4-flash"
+        self._max_tokens = max_tokens or int(
+            os.getenv("FINSIGHT_LLM_MAX_TOKENS", "4096")
+        )
+        self._max_retries = max_retries or int(
+            os.getenv("FINSIGHT_LLM_MAX_RETRIES", "3")
+        )
         self._timeout_seconds = timeout_seconds or float(
             os.getenv("FINSIGHT_LLM_TIMEOUT_SECONDS", "60")
         )
@@ -46,6 +62,7 @@ class LlmClient:
         prompt_name: str,
         variables: dict[str, object],
     ) -> dict[str, Any]:
+        # legacy fixture：无网络测试场景
         raw = os.getenv(_legacy_response_env(prompt_name))
         if raw:
             payload = json.loads(raw)
@@ -55,33 +72,45 @@ class LlmClient:
 
         if not self._api_key:
             raise RuntimeError(
-                "missing llm api key: set FINSIGHT_LLM_API_KEY or DEVAGI_API_KEY"
+                "missing llm api key: set AGICTO_API_KEY"
             )
 
         request = self._build_request(prompt_name=prompt_name, variables=variables)
-        response = requests.post(
-            f"{self._base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self._model,
-                "temperature": 0,
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {"role": "system", "content": request.system_prompt},
-                    {"role": "user", "content": request.user_prompt},
-                ],
-            },
-            timeout=self._timeout_seconds,
-        )
-        response.raise_for_status()
+        url = f"{self._API_BASE}/chat/completions"
+        body = self._build_openai_body(request)
 
-        payload = _extract_json_payload(response.json())
-        if not isinstance(payload, dict):
-            raise ValueError("llm response must be a JSON object")
-        return payload
+        last_error: Exception | None = None
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                response = requests.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=self._timeout_seconds,
+                )
+                # 429/5xx 视为可重试
+                if response.status_code in (429, 500, 502, 503, 504):
+                    raise requests.HTTPError(
+                        f"agicto returned {response.status_code}",
+                        response=response,
+                    )
+                response.raise_for_status()
+                text = _extract_content_text(response.json())
+                payload = _parse_json_payload(text)
+                if not isinstance(payload, dict):
+                    raise ValueError("llm response must be a JSON object")
+                return payload
+            except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as e:
+                last_error = e
+                if attempt < self._max_retries:
+                    time.sleep(1.5 * attempt)
+                    continue
+                raise
+
+        raise last_error or RuntimeError("llm call failed after retries")
 
     def _build_request(
         self,
@@ -112,6 +141,18 @@ class LlmClient:
             user_prompt=user_prompt,
         )
 
+    def _build_openai_body(self, request: LlmRequest) -> dict[str, Any]:
+        return {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": request.system_prompt},
+                {"role": "user", "content": request.user_prompt},
+            ],
+            "temperature": 0,
+            "max_tokens": self._max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+
 
 def _legacy_response_env(prompt_name: str) -> str:
     return f"FINSIGHT_{prompt_name.upper()}_JSON"
@@ -133,7 +174,8 @@ def _default_system_prompt(prompt_name: str) -> str:
     )
 
 
-def _extract_json_payload(response_payload: dict[str, Any]) -> dict[str, Any]:
+def _extract_content_text(response_payload: dict[str, Any]) -> str:
+    """从 OpenAI 兼容响应中提取文本内容。"""
     choices = response_payload.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError("llm response missing choices")
@@ -143,26 +185,37 @@ def _extract_json_payload(response_payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("llm response missing message")
 
     content = message.get("content")
-    normalized_content = _normalize_message_content(content)
-    payload = json.loads(normalized_content)
-    if not isinstance(payload, dict):
-        raise ValueError("llm response must be a JSON object")
-    return payload
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("llm response missing content text")
+
+    return content
 
 
-def _normalize_message_content(content: object) -> str:
-    if isinstance(content, str) and content.strip():
-        return content
-    if isinstance(content, list):
-        text_parts: list[str] = []
-        for item in content:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") == "text" and isinstance(item.get("text"), str):
-                text_parts.append(item["text"])
-        if text_parts:
-            return "".join(text_parts)
-    raise ValueError("llm response missing message content")
+def _parse_json_payload(text: str) -> dict[str, Any]:
+    """从 LLM 响应文本中解析 JSON 对象。
+
+    response_format=json_object 下通常返回纯 JSON，
+    但偶发会带前后空白或多余文本，这里先尝试直接解析，失败则用正则提取第一个 {} 块。
+    """
+    text = text.strip()
+    if not text:
+        raise ValueError("llm response is empty")
+
+    try:
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+
+    # 兜底：提取第一个 {...} 块
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        payload = json.loads(match.group(0))
+        if isinstance(payload, dict):
+            return payload
+
+    raise ValueError(f"llm response is not valid JSON: {text[:200]!r}")
 
 
 def _json_default(value: object) -> str:

@@ -82,16 +82,17 @@ def route_with_rules(
             constraints={"preferred_output": "brief_answer"},
         )
 
+    # 兜底：金融领域但不属于 metric/event/evidence 任一类型 → 泛财经轻路径（LLM 直答）
     return RouterResult(
-        intent=Intent.OUT_OF_SCOPE.value,
+        intent=Intent.GENERAL_FINANCE_QA.value,
         follow_up_type=follow_up_type,
         confidence="medium",
-        entities={"query": normalized_query},
-        needs=[],
-        constraints={
-            "preferred_output": "guardrail",
-            "reason_code": "unsupported_request_shape",
+        entities={
+            "query": normalized_query,
+            "topics": _extract_topics(normalized_query),
         },
+        needs=["direct_llm"],
+        constraints={"preferred_output": "direct"},
     )
 
 
@@ -150,7 +151,34 @@ def _looks_like_evidence_lookup(
 
 
 def _is_out_of_scope(query: str) -> bool:
-    return any(keyword in query for keyword in ("股价", "估值模型", "目标价", "下周走势", "短线"))
+    """只拦截真正不支持的：投资建议/荐股类。泛财经常识问题不再被打成 out_of_scope。"""
+    return any(keyword in query for keyword in ("股价", "估值模型", "目标价", "下周走势", "短线", "推荐买", "荐股"))
+
+
+def _extract_topics(query: str) -> list[str]:
+    """从泛财经 query 中抽取主题词，供 direct_answer prompt 使用。"""
+    topics: list[str] = []
+    finance_keywords = {
+        "汇率": "汇率",
+        "贬值": "汇率",
+        "升值": "汇率",
+        "降息": "货币政策",
+        "加息": "货币政策",
+        "通胀": "通胀",
+        "利率": "利率",
+        "债市": "债市",
+        "股市": "股市",
+        "航运": "航运",
+        "半导体": "半导体",
+        "原油": "原油",
+        "黄金": "黄金",
+    }
+    for keyword, topic in finance_keywords.items():
+        if keyword in query and topic not in topics:
+            topics.append(topic)
+    if not topics:
+        topics.append("泛金融")
+    return topics
 
 
 def _extract_company(query: str) -> str | None:

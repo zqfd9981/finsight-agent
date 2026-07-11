@@ -118,15 +118,15 @@ class StreamlitAnalysisViewTest(unittest.TestCase):
                 AnalysisStreamEvent(
                     event_type="stage_started",
                     run_id="run_001",
-                    stage_name="planning",
+                    stage_name="stage_planning",
                     status="running",
-                    message="Planning started",
+                    message="Stage planning started",
                     started_at="2026-07-08T00:00:10Z",
                 ),
             ]
         )
 
-        self.assertEqual(view["current_stage"], "planning")
+        self.assertEqual(view["current_stage"], "stage_planning")
         self.assertEqual(view["completed_count"], 1)
         self.assertEqual(view["stages"][0]["status"], "success")
         self.assertEqual(view["stages"][1]["status"], "running")

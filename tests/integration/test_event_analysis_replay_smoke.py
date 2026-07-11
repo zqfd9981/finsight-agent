@@ -19,7 +19,6 @@ from finsight_agent.control_plane.session.service import SessionService
 from finsight_agent.evaluation.event_eval.replay import replay_event_cases
 from finsight_agent.workbench_backend_api.service import WorkbenchBackendApiService
 from tests.integration.test_event_impact_analysis_flow import (
-    _StubPlannerService,
     _StubRetrievalFacade,
     _StubRouterService,
     _StubStrategyClassifier,
@@ -78,7 +77,6 @@ class EventAnalysisReplaySmokeTest(unittest.TestCase):
 
             service = WorkbenchBackendApiService(
                 router_service=_StubRouterService(),
-                planner_service=_StubPlannerService(),
                 orchestrator_service=OrchestratorService(
                     retrieval_facade=_StubRetrievalFacade(),
                     external_context_retriever=_EvalExternalContextRetriever(),

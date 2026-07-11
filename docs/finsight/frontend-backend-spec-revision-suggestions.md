@@ -309,7 +309,7 @@
 - `metric_lookup`
 - `event_impact_analysis`
 - `retrieve_evidence`
-- `synthesize_report`
+- `synthesize_answer`
 
 这些属于能力链路，不属于工程层目录调整。
 

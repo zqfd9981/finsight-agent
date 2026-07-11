@@ -5,7 +5,6 @@ from typing import Any
 
 from shared.contracts.final_response import FinalResponse
 from shared.contracts.guardrail_or_error_response import GuardrailOrErrorResponse
-from shared.contracts.plan import Plan
 from shared.contracts.router_result import RouterResult
 from shared.contracts.stage_observation import StageObservation
 from shared.contracts.trace_block import TraceBlock
@@ -26,11 +25,17 @@ class StageExecutionResult:
 
 @dataclass(slots=True)
 class OrchestrationResult:
-    """orchestrator 内部汇总结果。"""
+    """orchestrator 内部汇总结果。
+
+    原先持有 Plan 对象，重构后改为持有 stages + stage_constraints + response_mode，
+    由 stage_planner.resolve_stages 产出，orchestrator 直接消费。
+    """
 
     session_id: str
     router_result: RouterResult | None = None
-    plan: Plan | None = None
+    stages: list[str] = field(default_factory=list)
+    stage_constraints: dict[str, Any] = field(default_factory=dict)
+    response_mode: str = ""
     stage_observations: list[StageObservation] = field(default_factory=list)
     final_response: FinalResponse | None = None
     guardrail_response: GuardrailOrErrorResponse | None = None

@@ -68,7 +68,7 @@ def _summarize_key_outputs(observation: StageObservation) -> dict[str, object]:
         return {
             "evidence_ref_count": len(observation.evidence_refs),
         }
-    if stage_name == "synthesize_report":
+    if stage_name == "synthesize_answer":
         final_response = key_outputs.get("final_response")
         return {
             "response_type": str(getattr(final_response, "response_type", "") or "").strip(),

@@ -43,8 +43,8 @@ class StreamlitDebugViewTest(unittest.TestCase):
                     payload_summary={"intent": "event_impact_analysis"},
                 ),
                 TraceBlock(
-                    block_type="planning",
-                    title="Planning",
+                    block_type="stage_planning",
+                    title="Stage Planning",
                     status="success",
                     payload_summary={
                         "stages": ["collect_event_context", "analyze_targets"]
@@ -79,7 +79,7 @@ class StreamlitDebugViewTest(unittest.TestCase):
         model = build_debug_view_model(envelope)
 
         self.assertEqual(model["routing"]["intent"], "event_impact_analysis")
-        self.assertEqual(model["planning"]["stages"][0], "collect_event_context")
+        self.assertEqual(model["stage_planning"]["stages"][0], "collect_event_context")
         self.assertEqual(
             model["execution"]["stage_statuses"]["analyze_targets"], "degraded"
         )
