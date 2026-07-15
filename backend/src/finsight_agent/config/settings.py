@@ -65,12 +65,22 @@ class RetrievalSettings:
 
 
 @dataclass(slots=True)
+class StructuredDataSettings:
+    """Structured metric data storage settings."""
+
+    storage_root: Path
+    sqlite_path: Path
+    aliases_path: Path
+
+
+@dataclass(slots=True)
 class AppSettings:
     """Top-level application settings object."""
 
     control_plane: ControlPlaneSettings
     reporting: ReportingSettings
     retrieval: RetrievalSettings
+    structured_data: StructuredDataSettings
 
 
 def load_settings() -> AppSettings:
@@ -84,6 +94,7 @@ def load_settings() -> AppSettings:
     control_plane_config = _require_mapping(app_config.get("control_plane"), "app.control_plane")
     reporting_config = _require_mapping(app_config.get("reporting"), "app.reporting")
     retrieval_config = _require_mapping(app_config.get("retrieval"), "app.retrieval")
+    structured_data_config = _require_mapping(app_config.get("structured_data"), "app.structured_data")
     dense_config = _require_mapping(retrieval_config.get("dense"), "app.retrieval.dense")
 
     control_plane_root = _resolve_path(repo_root, _require_text(control_plane_config, "root"))
@@ -142,6 +153,11 @@ def load_settings() -> AppSettings:
             primary_parser_name=_require_text(retrieval_config, "primary_parser_name"),
             parent_target_chars=_require_int(retrieval_config, "parent_target_chars"),
             child_target_chars=_require_int(retrieval_config, "child_target_chars"),
+        ),
+        structured_data=StructuredDataSettings(
+            storage_root=_resolve_path(repo_root, _require_text(structured_data_config, "storage_root")),
+            sqlite_path=_resolve_path(repo_root, _require_text(structured_data_config, "sqlite_path")),
+            aliases_path=_resolve_path(repo_root, _require_text(structured_data_config, "aliases_path")),
         ),
     )
 

@@ -13,6 +13,7 @@ for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
+from finsight_agent.capabilities.structured_data.metric_normalizer import MetricNormalizer
 from finsight_agent.capabilities.structured_data.models import MetricRecord
 from finsight_agent.capabilities.structured_data.repository import MetricRepository
 from finsight_agent.capabilities.structured_data.service import StructuredDataService
@@ -47,7 +48,7 @@ class _StubExternalMetricProvider:
 class StructuredDataServiceTest(unittest.TestCase):
     def test_query_metric_lookup_reads_local_metric_record_first(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            repository = MetricRepository(storage_dir=temp_dir)
+            repository = MetricRepository(sqlite_path=Path(temp_dir) / "metrics.db")
             repository.save_records(
                 [
                     MetricRecord(
@@ -55,12 +56,12 @@ class StructuredDataServiceTest(unittest.TestCase):
                         company_code="300750",
                         metric_name="net_profit",
                         metric_label="归母净利润",
-                        time_scope="2024_annual",
+                        time_scope="期末余额",
                         period_end="2024-12-31",
                         value="507.45",
                         unit="亿元",
                         currency="CNY",
-                        source_type="local_filing_table",
+                        source_type="annual_report",
                         source_document_id="doc_001",
                         source_table_id="table_001",
                         source_caption="主要会计数据",
@@ -73,22 +74,65 @@ class StructuredDataServiceTest(unittest.TestCase):
             result = service.query_metric_lookup(
                 company="宁德时代",
                 metric="net_profit",
-                time_scope="2024_annual",
+                time_scope="期末余额",
             )
 
         self.assertEqual(result["value"], "507.45")
-        self.assertEqual(result["source_type"], "local_filing_table")
+        self.assertEqual(result["source_type"], "annual_report")
         self.assertFalse(result["is_degraded"])
+
+    def test_query_metric_lookup_normalizes_chinese_metric_before_query(self) -> None:
+        """路由返回中文'净利润'，normalizer 映射到英文 key 'net_profit' 后命中 SQLite。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = MetricRepository(sqlite_path=Path(temp_dir) / "metrics.db")
+            repository.save_records(
+                [
+                    MetricRecord(
+                        company_name="宁德时代",
+                        company_code="300750",
+                        metric_name="net_profit",
+                        metric_label="净利润",
+                        time_scope="期末余额",
+                        period_end="2024-12-31",
+                        value="507.45",
+                        unit="亿元",
+                        currency="CNY",
+                        source_type="annual_report",
+                        source_document_id="doc_001",
+                        source_table_id="table_001",
+                        source_caption="主要会计数据",
+                        confidence="high",
+                    )
+                ]
+            )
+            normalizer = MetricNormalizer(
+                aliases_path=Path(temp_dir) / "aliases.json",
+            )
+            service = StructuredDataService(
+                metric_repository=repository,
+                normalizer=normalizer,
+            )
+
+            result = service.query_metric_lookup(
+                company="宁德时代",
+                metric="净利润",
+                time_scope="2024-12-31",
+            )
+
+        self.assertFalse(result.get("is_degraded", True))
+        self.assertEqual(result["value"], "507.45")
 
     def test_query_metric_lookup_returns_degraded_result_when_no_source_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = StructuredDataService(
-                metric_repository=MetricRepository(storage_dir=temp_dir)
+                metric_repository=MetricRepository(
+                    sqlite_path=Path(temp_dir) / "metrics.db"
+                )
             )
             result = service.query_metric_lookup(
                 company="宁德时代",
                 metric="operating_cash_flow",
-                time_scope="2025_annual",
+                time_scope="期末余额",
             )
 
         self.assertTrue(result["is_degraded"])
@@ -99,20 +143,22 @@ class StructuredDataServiceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             provider = _StubExternalMetricProvider()
             service = StructuredDataService(
-                metric_repository=MetricRepository(storage_dir=temp_dir),
+                metric_repository=MetricRepository(
+                    sqlite_path=Path(temp_dir) / "metrics.db"
+                ),
                 external_provider=provider,
             )
 
             result = service.query_metric_lookup(
                 company="宁德时代",
                 metric="revenue",
-                time_scope="2025_annual",
+                time_scope="期末余额",
             )
 
         self.assertEqual(result["source_type"], "external_api")
         self.assertEqual(
             provider.calls,
-            [("宁德时代", "revenue", "2025_annual")],
+            [("宁德时代", "revenue", "期末余额")],
         )
 
 

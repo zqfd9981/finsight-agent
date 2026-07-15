@@ -19,13 +19,17 @@ app:
     status_root: var/data/corpus_status
     dense:
       qdrant_collection_name: finsight_pdf_chunks_v1
-      embedding_model_name: bge-m3
+      embedding_model_name: BAAI/bge-m3
       embedding_model_version: bge-m3-v1
       qdrant_path: var/data/qdrant
     default_pilot_company_count: 10
     primary_parser_name: mineru
     parent_target_chars: 2000
     child_target_chars: 500
+  structured_data:
+    storage_root: var/data/structured_data
+    sqlite_path: var/data/structured_data/metrics.db
+    aliases_path: var/data/structured_data/metric_aliases.json
   workbench:
     mode: runnable
     backend_host: 127.0.0.1

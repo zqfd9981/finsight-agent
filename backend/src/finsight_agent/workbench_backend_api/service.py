@@ -21,6 +21,7 @@ from finsight_agent.control_plane.orchestrator.trained_strategy_classifier impor
 )
 from finsight_agent.control_plane.router.service import RouterService
 from finsight_agent.control_plane.session.service import SessionService
+from finsight_agent.infra.llm.client import LlmClient
 from finsight_agent.shared.utils.execution_events import (
     EventCallback,
     RunEventEmitter,
@@ -38,9 +39,16 @@ class WorkbenchBackendApiService:
         orchestrator_service: OrchestratorService | None = None,
         session_service: SessionService | None = None,
         retrieval_strategy_classifier=None,
+        llm_client: LlmClient | None = None,
     ) -> None:
         self._router_service = router_service or RouterService()
-        self._orchestrator_service = orchestrator_service or OrchestratorService()
+        self._llm_client = llm_client or LlmClient()
+        if orchestrator_service is not None:
+            self._orchestrator_service = orchestrator_service
+        else:
+            self._orchestrator_service = OrchestratorService(
+                llm_client=self._llm_client,
+            )
         self._session_service = session_service or SessionService()
         self._retrieval_strategy_classifier = (
             retrieval_strategy_classifier

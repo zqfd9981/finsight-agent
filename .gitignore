@@ -32,6 +32,9 @@ build/
 .codex/
 visual/
 runtime/
+.codebuddy/
+.trae/
+.workbuddy/
 
 # 根目录临时说明与可视化文件
 /9个Specs关系图.html

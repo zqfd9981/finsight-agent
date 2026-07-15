@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import closing
 import json
+import time
 from pathlib import Path
 
 from qdrant_client.http import models as qdrant_models
@@ -26,7 +27,11 @@ class DenseChunkIndex:
         self._embedding_provider = embedding_provider
 
     def rebuild_from_chunk_root(self, chunk_root: Path) -> int:
-        """从 chunked_filings 全量重建 Qdrant dense 索引。"""
+        """从 chunked_filings 全量重建 Qdrant dense 索引。
+
+        只索引 ``__rag`` 后缀的目录：这些是 page_filter 产出的 MinerU 解析、
+        叙述性文本切片（财务三表已进 SQLite，不重复入向量库）。
+        """
 
         self._store.recreate_collection(
             collection_name=self._collection_name,
@@ -35,16 +40,36 @@ class DenseChunkIndex:
 
         indexed_count = 0
         point_id = 1
-        for children_path in sorted(chunk_root.glob("*/children.jsonl")):
+        t0 = time.time()
+        all_files = sorted(chunk_root.glob("*/children.jsonl"))
+        # 只保留 __rag 目录（MinerU 解析的 2025 年报叙述性切片）
+        files = [f for f in all_files if f.parent.name.endswith("__rag")]
+        total_files = len(files)
+        skipped = len(all_files) - total_files
+        print(
+            f"  共 {len(all_files)} 个 children.jsonl，"
+            f"筛选 __rag 目录: {total_files} 个，跳过 {skipped} 个",
+            flush=True,
+        )
+
+        for file_idx, children_path in enumerate(files, 1):
             rows = self._read_jsonl(children_path)
             if not rows:
                 continue
             payloads = [self._normalize_chunk_row(row) for row in rows]
-            vectors = self._embedding_provider.embed(
-                [str(payload["chunk_text"]) for payload in payloads]
-            )
+
+            # 分批 embedding（CPU 模式，批大小 64 匹配模型内部 batch）
+            batch_size = 64
+            all_vectors: list[list[float]] = []
+            for batch_start in range(0, len(payloads), batch_size):
+                batch = payloads[batch_start:batch_start + batch_size]
+                batch_vectors = self._embedding_provider.embed(
+                    [str(p["chunk_text"]) for p in batch]
+                )
+                all_vectors.extend(batch_vectors)
+
             points: list[qdrant_models.PointStruct] = []
-            for payload, vector in zip(payloads, vectors, strict=True):
+            for payload, vector in zip(payloads, all_vectors, strict=True):
                 points.append(
                     qdrant_models.PointStruct(
                         id=point_id,
@@ -59,6 +84,16 @@ class DenseChunkIndex:
                     collection_name=self._collection_name,
                     points=points,
                     wait=True,
+                )
+            # 每 5 个文件打一次进度
+            if file_idx % 5 == 0 or file_idx == total_files:
+                elapsed = time.time() - t0
+                speed = indexed_count / elapsed if elapsed > 0 else 0
+                eta = (total_files - file_idx) * (elapsed / file_idx) if file_idx > 0 else 0
+                print(
+                    f"  [{file_idx}/{total_files}] {indexed_count} chunks, "
+                    f"{speed:.0f} chunk/s, ETA {eta:.0f}s",
+                    flush=True,
                 )
         return indexed_count
 

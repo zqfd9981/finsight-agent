@@ -65,12 +65,37 @@ def _summarize_key_outputs(observation: StageObservation) -> dict[str, object]:
             "confidence": str(key_outputs.get("confidence") or "").strip(),
         }
     if stage_name == "retrieve_evidence":
-        return {
+        agent_trace = key_outputs.get("agent_trace") or {}
+        result: dict[str, object] = {
             "evidence_ref_count": len(observation.evidence_refs),
         }
+        if agent_trace:
+            result["agent_rounds_count"] = int(agent_trace.get("rounds_count") or 0)
+            result["agent_rewritten_queries"] = list(agent_trace.get("rewritten_queries") or [])
+            result["agent_reflect_reason"] = str(agent_trace.get("reflect_reason") or "")
+            # rounds_trace 可能含 dict，截断避免 trace 过大
+            rounds_trace = agent_trace.get("rounds_trace") or []
+            result["agent_rounds_trace"] = list(rounds_trace[:3])
+        return result
     if stage_name == "synthesize_answer":
         final_response = key_outputs.get("final_response")
         return {
             "response_type": str(getattr(final_response, "response_type", "") or "").strip(),
         }
+    if stage_name == "query_structured_data":
+        # 暴露结构化数据查询结果到 trace，便于前端展示命中/未命中状态
+        structured_result = key_outputs.get("structured_result") or {}
+        if isinstance(structured_result, dict):
+            return {
+                "company": str(structured_result.get("company") or structured_result.get("company_name") or ""),
+                "metric": str(structured_result.get("metric") or structured_result.get("metric_name") or ""),
+                "value": str(structured_result.get("value") or ""),
+                "unit": str(structured_result.get("unit") or ""),
+                "time_scope": str(structured_result.get("time_scope") or ""),
+                "is_degraded": bool(structured_result.get("is_degraded", True)),
+                "matched_by": str(structured_result.get("matched_by") or ""),
+                "source_summary": str(structured_result.get("source_summary") or "")[:200],
+                "confidence": str(structured_result.get("confidence") or ""),
+            }
+        return {}
     return {}

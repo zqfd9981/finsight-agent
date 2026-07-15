@@ -29,7 +29,14 @@ def run_collect_event_context_stage(
     retrieval_budget = int(constraints.get("retrieval_budget") or 3)
     event = str(entities.get("event") or "").strip()
     themes = _normalize_parts(entities.get("themes"))
-    time_scope = str(entities.get("time_scope") or "recent").strip()
+    # 适配新 entities 结构：event intent 的 time_scope 通常是字符串，
+    # 但防御性处理 dict 格式（新格式 metric_lookup 会输出 dict）
+    time_scope_raw = entities.get("time_scope_raw") or entities.get("period_end")
+    time_scope_entity = entities.get("time_scope")
+    if isinstance(time_scope_entity, dict):
+        time_scope = str(time_scope_raw or "recent").strip()
+    else:
+        time_scope = str(time_scope_entity or time_scope_raw or "recent").strip()
     strategy = str(constraints.get("strategy") or "").strip()
 
     external_payload = external_context_retriever.retrieve_event_context(

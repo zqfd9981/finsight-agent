@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -8,6 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -196,11 +199,14 @@ def _parse_json_payload(text: str) -> dict[str, Any]:
 
     response_format=json_object 下通常返回纯 JSON，
     但偶发会带前后空白或多余文本，这里先尝试直接解析，失败则用正则提取第一个 {} 块。
+    LLM 偶发会返回字符串值含未转义引号或内部逗号缺失的非法 JSON，
+    此时记录原始返回用于诊断，并抛出 ValueError 让上层决定降级策略。
     """
     text = text.strip()
     if not text:
         raise ValueError("llm response is empty")
 
+    # 尝试 1：直接解析
     try:
         payload = json.loads(text)
         if isinstance(payload, dict):
@@ -208,13 +214,32 @@ def _parse_json_payload(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # 兜底：提取第一个 {...} 块
-    match = re.search(r"\{[\s\S]*\}", text)
+    # 尝试 2：提取第一个 {...} 块（非贪婪，避免多块场景误匹配）
+    match = re.search(r"\{[\s\S]*?\}", text)
     if match:
-        payload = json.loads(match.group(0))
-        if isinstance(payload, dict):
-            return payload
+        try:
+            payload = json.loads(match.group(0))
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass  # 继续尝试下面
 
+    # 尝试 3：去掉可能的 markdown 代码块标记后重试
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    if cleaned != text:
+        try:
+            payload = json.loads(cleaned)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
+
+    # 全部失败：记录原始返回用于诊断
+    _logger.warning(
+        "llm response is not valid JSON (len=%d, first 300 chars): %r",
+        len(text),
+        text[:300],
+    )
     raise ValueError(f"llm response is not valid JSON: {text[:200]!r}")
 
 

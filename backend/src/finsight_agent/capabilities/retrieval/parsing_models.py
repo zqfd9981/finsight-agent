@@ -34,11 +34,16 @@ class ParsedTable:
     caption_text: str = ""
     table_text: str = ""
     table_markdown: str = ""
+    table_html: str = ""
     parser_source: str = ""
     confidence: float | None = None
     bbox: dict[str, float] | None = None
     table_type_hint: str | None = None
     related_metric_hints: list[str] = field(default_factory=list)
+    # 从解析产物（MinerU 缓存文本块的单位声明）解析出的该表真实单位：
+    # "元" / "千元" / "万元" / "百万元"。空串表示未解析到，下游回退为 "元"。
+    # 关键：仅修正单位标签，绝不改写 value 数值（数值保持 PDF 印数原样）。
+    resolved_unit: str = ""
 
 
 @dataclass(slots=True)

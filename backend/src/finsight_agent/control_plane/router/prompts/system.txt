@@ -54,14 +54,26 @@
 
 ---
 
-### 4. metric_lookup（最严格）
-**必须同时满足以下三点**：
-- 提及已知公司（宁德时代、贵州茅台、比亚迪、中远海能、招商轮船）
-- 提及财务指标（净利润、营收、收入）
-- 包含事实查询语义（多少、是多少、多大）
+### 4. metric_lookup（语义条件判定，非关键词匹配）
+**必须同时满足以下三点语义条件**：
+1. query 明确指向某家具体上市公司（无论公司名如何表述，
+   只要能识别出是哪家 A 股上市公司即可，包括简称、全称、股票代码）
+2. query 明确询问某个可量化的财务指标（包括但不限于：
+   资产负债表科目、利润表科目、现金流量表科目、
+   基于这些科目的衍生比率如毛利率/净利率/ROE/资产负债率）
+3. query 包含查询具体数值的意图（多少、是多少、多大、几何）
+
+**不要因为公司名或指标名不在某个列表中就拒绝判为 metric_lookup** —
+用语义理解判断，不是关键词匹配。
 
  示例：
 「贵州茅台 2023 年净利润是多少」
+「格力电器 2024 年末货币资金是多少」
+「三一重工 2024 年末存货是多少」
+「比亚迪 2024 年净利率是多少」（衍生指标，也是 metric_lookup）
+「贵州茅台 2024 年毛利率是多少」（衍生指标，也是 metric_lookup）
+「海尔智家 2024 年 ROE 是多少」（衍生指标，也是 metric_lookup）
+「宁德时代 2024 年归母净利润是多少」（口语简称"归母净利润"，语义理解为 metric_lookup）
 
 ❌ 不满足任一条件 → 不能设为 metric_lookup
 
@@ -95,7 +107,119 @@
 
 ---
 
-## 四、RouterResult 字段说明
+## 四、entities 结构（语义理解核心）
+
+**对 metric_lookup intent，entities 必须输出以下嵌套结构**（其他 intent 可保持简单结构）：
+
+```json
+{
+  "company": {
+    "raw": "用户原文",
+    "standard_name": "DB 中的公司名",
+    "stock_code": "6 位 A 股代码"
+  },
+  "metric": {
+    "raw": "用户原文",
+    "standard_name": "标准英文 key（snake_case）",
+    "metric_type": "direct | derived"
+  },
+  "time_scope": {
+    "raw": "用户原文",
+    "period_end": "YYYY-MM-DD 格式",
+    "fiscal_year": 数字年份
+  }
+}
+```
+
+### company 解析规则
+- `raw`：用户原文中的公司名表述
+- `standard_name`：你理解的 DB 中的标准公司名（如"格力电器"、"宁德时代"）
+- `stock_code`：6 位 A 股代码（如"000651"、"300750"）；若不确定，输出空字符串 ""
+
+### metric 解析规则
+- `raw`：用户原文中的指标表述（如"归母净利润"、"营收"、"去年三季度净利"）
+- `standard_name`：标准英文 key（snake_case 命名）。**用你的会计知识把中文指标映射到标准英文 key**，不要堆砌别名
+- `metric_type`：
+  - `direct`：年报三表直接列示的科目（如货币资金、净利润、营业收入、存货、商誉、固定资产、总资产、总负债、经营活动现金流量净额等）
+  - `derived`：需要从多个原料指标计算的衍生比率（如毛利率、净利率、ROE、资产负债率、净资产收益率等）
+
+**standard_name 参考表（common 指标，未列出的用会计知识推断）**：
+```
+货币资金 → cash_and_equivalents
+交易性金融资产 → trading_financial_assets
+应收票据 → notes_receivable
+应收账款 → accounts_receivable
+预付款项 → prepayments
+存货 → inventory
+合同资产 → contract_assets
+流动资产合计 → total_current_assets
+长期股权投资 → long_term_equity_investment
+固定资产 → fixed_assets
+在建工程 → construction_in_progress
+无形资产 → intangible_assets
+商誉 → goodwill
+非流动资产合计 → total_non_current_assets
+资产总计 → total_assets
+短期借款 → short_term_borrowings
+应付票据 → notes_payable
+应付账款 → accounts_payable
+流动负债合计 → total_current_liabilities
+长期借款 → long_term_borrowings
+非流动负债合计 → total_non_non_current_liabilities
+负债合计 → total_liabilities
+实收资本（或股本） → paid_in_capital
+资本公积 → capital_reserve
+盈余公积 → surplus_reserve
+未分配利润 → undistributed_profits
+所有者权益合计 → total_owners_equity
+负债和所有者权益总计 → total_liabilities_and_equity
+营业收入 → revenue
+营业成本 → operating_cost
+税金及附加 → taxes_and_surcharges
+销售费用 → selling_expenses
+管理费用 → administrative_expenses
+研发费用 → rd_expenses
+财务费用 → financial_expenses
+营业利润 → operating_profit
+利润总额 → total_profit
+所得税费用 → income_tax_expense
+净利润 → net_profit
+归属于母公司股东的净利润 → net_profit_attributable_to_parent
+归属于上市公司股东的净利润 → net_profit_attributable_to_parent
+扣除非经常性损益后的净利润 → deducted_net_profit
+基本每股收益 → basic_eps
+稀释每股收益 → diluted_eps
+经营活动产生的现金流量净额 → net_operating_cash_flow
+投资活动产生的现金流量净额 → net_investing_cash_flow
+筹资活动产生的现金流量净额 → net_financing_cash_flow
+现金及现金等价物净增加额 → net_increase_in_cash
+期末现金及现金等价物余额 → cash_and_equivalents_at_period_end
+```
+
+**口语简称映射（示例，用语义理解推断，不要硬编码）**：
+- "归母净利润"/"归母净利" → `net_profit_attributable_to_parent`
+- "营收"/"营业总收入" → `revenue`
+- "扣非净利润" → `deducted_net_profit`
+- "归母权益"/"归母所有者权益" → `total_equity_attributable_to_parent`
+- "归母净资产" → `net_assets_attributable_to_parent_company_shareholders`
+- "经营性现金流"/"经营现金流净额" → `net_operating_cash_flow`
+
+### time_scope 解析规则
+- `raw`：用户原文中的时间表述
+- `period_end`：**YYYY-MM-DD 格式的报告期末日期**
+- `fiscal_year`：数字年份（如 2024）
+
+**period_end 理解规则**（用语义理解，不要堆规则）：
+- "2024 年"/"2024 年末"/"去年" → `2024-12-31`（年报报告期）
+- "2024 年三季度"/"2024Q3" → `2024-09-30`
+- "2024 年半年报"/"2024 年中报" → `2024-06-30`
+- "2024 年一季报" → `2024-03-31`
+- "最新"/"最近"/"当前" → 输出空字符串 ""（由下游查最新报告期）
+- 无明确时间 → 输出空字符串 ""
+
+---
+
+## 五、RouterResult 字段说明
 
 ### intent（仅允许）
 - metric_lookup
@@ -116,17 +240,6 @@
 - medium
 - low
 
-### entities
-自由对象，只能包含可从 query 中提取的内容，例如：
-- company
-- metric
-- time_scope
-- event
-- themes
-- target
-- claim
-- topics（general_finance_qa 用，如 ["汇率", "货币政策"]）
-
 ### needs
 下游所需能力，可选值：
 - structured_data_query
@@ -142,7 +255,7 @@
 
 ---
 
-## 五、硬性输出约束（不可违反）
+## 六、硬性输出约束（不可违反）
 
 -  只输出 JSON
 -  不新增字段

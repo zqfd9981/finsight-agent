@@ -11,8 +11,13 @@ from finsight_agent.capabilities.retrieval.parsing_service import normalize_pars
 class PdfplumberDocumentParser:
     """使用 pdfplumber 提供整份文档级轻量 fallback 解析。"""
 
-    def parse(self, pdf_path: Path) -> ParsedDocumentArtifact:
-        """提取页级文本和基础表格，再映射成统一解析产物。"""
+    def parse(self, pdf_path: Path, page_filter: set[int] | None = None) -> ParsedDocumentArtifact:
+        """提取页级文本和基础表格，再映射成统一解析产物。
+
+        Args:
+            pdf_path: PDF 文件路径
+            page_filter: 只解析这些页码（1-based）。None 表示全量解析。
+        """
 
         elements: list[dict[str, object]] = []
         tables: list[dict[str, object]] = []
@@ -21,6 +26,8 @@ class PdfplumberDocumentParser:
         with pdfplumber.open(pdf_path) as pdf:
             page_count = len(pdf.pages)
             for page_index, page in enumerate(pdf.pages, start=1):
+                if page_filter is not None and page_index not in page_filter:
+                    continue
                 raw_text = page.extract_text() or ""
                 text_parts = _split_page_into_parts(raw_text)
                 if _should_skip_page(text_parts):

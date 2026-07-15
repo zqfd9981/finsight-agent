@@ -105,9 +105,13 @@ def _should_index_section(section_path: list[str], section_elements: list[Parsed
     if not section_elements:
         return False
 
-    # 没有章节归属的内容通常是封面、前言或董事长致辞，首版先不进入检索主链路。
+    # 没有章节归属的内容：在 pdfplumber 场景下通常是封面/前言，跳过；
+    # 但 MinerU 场景下可能整段文档没有 title 元素导致 section_path 全空，
+    # 此时不应全部丢弃，给个默认 section 让内容能进检索。
     if not section_path:
-        return False
+        # 如果元素里有实质性内容（段落较长），保留进检索
+        total_chars = sum(len(e.text.strip()) for e in section_elements)
+        return total_chars >= 50
 
     section_label = section_path[-1]
 

@@ -64,6 +64,7 @@ class SparseRetrievalFacadeTest(unittest.TestCase):
                 retrieval_index_root=index_root,
                 min_original_hits=1,
             )
+            facade.rebuild_index()
 
             result = facade.search("归母净利润", limit=5)
 

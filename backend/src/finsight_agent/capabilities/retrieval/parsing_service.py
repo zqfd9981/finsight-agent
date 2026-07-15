@@ -150,6 +150,7 @@ def normalize_parsed_document(
                 caption_text=str(raw_table.get("caption_text", "")),
                 table_text=str(raw_table.get("table_text", "")),
                 table_markdown=str(raw_table.get("table_markdown", "")),
+                table_html=str(raw_table.get("table_html", "")),
                 parser_source=parser_source,
                 confidence=_maybe_float(raw_table.get("confidence")),
                 bbox=raw_table.get("bbox") if isinstance(raw_table.get("bbox"), dict) else None,
@@ -158,6 +159,7 @@ def normalize_parsed_document(
                     if raw_table.get("table_type_hint") is not None
                     else None
                 ),
+                resolved_unit=str(raw_table.get("resolved_unit", "") or ""),
                 related_metric_hints=[
                     str(item) for item in (raw_table.get("related_metric_hints", []) or [])
                 ],

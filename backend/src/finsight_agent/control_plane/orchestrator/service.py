@@ -8,7 +8,9 @@ from finsight_agent.capabilities.retrieval.service import (
     RetrievalFacade,
     build_retrieval_facade,
 )
+from finsight_agent.capabilities.structured_data.metric_normalizer import MetricNormalizer
 from finsight_agent.capabilities.structured_data.service import StructuredDataService
+from finsight_agent.infra.llm.client import LlmClient
 from finsight_agent.shared.utils.execution_events import (
     EventCallback,
     RunEventEmitter,
@@ -46,8 +48,16 @@ class OrchestratorService:
         retrieval_facade_factory: Callable[[], RetrievalFacade] | None = None,
         external_context_retriever: ExternalContextRetriever | None = None,
         target_analysis_service: TargetAnalysisService | None = None,
+        llm_client: LlmClient | None = None,
     ) -> None:
-        self._structured_data_service = structured_data_service or StructuredDataService()
+        if structured_data_service is not None:
+            self._structured_data_service = structured_data_service
+        else:
+            from finsight_agent.config.settings import load_settings
+
+            sd_settings = load_settings().structured_data
+            normalizer = MetricNormalizer(aliases_path=sd_settings.aliases_path)
+            self._structured_data_service = StructuredDataService(normalizer=normalizer)
         self._reporting_service = reporting_service or ReportingService()
         self._retrieval_facade = retrieval_facade
         self._retrieval_facade_factory = retrieval_facade_factory or build_retrieval_facade
@@ -55,6 +65,7 @@ class OrchestratorService:
             external_context_retriever or _build_default_external_context_retriever()
         )
         self._target_analysis_service = target_analysis_service or TargetAnalysisService()
+        self._llm_client = llm_client
 
     def execute(
         self,
@@ -133,6 +144,7 @@ class OrchestratorService:
                         if is_owned and owned_retrieval_facade is None:
                             owned_retrieval_facade = retrieval_facade
                         runner_kwargs["retrieval_facade"] = retrieval_facade
+                        runner_kwargs["llm_client"] = self._llm_client
 
                     stage_started_at = None
                     if emitter is not None:

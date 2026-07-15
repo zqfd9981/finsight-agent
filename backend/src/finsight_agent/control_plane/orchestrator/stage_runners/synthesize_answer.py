@@ -95,7 +95,11 @@ def _synthesize_brief(
         note_text = "；".join(notes) if notes else "当前未找到对应指标数据。"
         summary = f"{company}{time_scope}{metric}暂未命中结构化数据。{note_text}"
     else:
-        summary = f"{company}{time_scope}{metric}为 {value}{unit}。"
+        # value 已含 % 号（比率类衍生指标）时不再拼接 unit，避免 "91.63%%"
+        if unit == "%" and value.endswith("%"):
+            summary = f"{company}{time_scope}{metric}为 {value}。"
+        else:
+            summary = f"{company}{time_scope}{metric}为 {value}{unit}。"
 
     final_response = reporting_service.build_response(
         response_mode=ResponseMode.BRIEF_ANSWER.value,

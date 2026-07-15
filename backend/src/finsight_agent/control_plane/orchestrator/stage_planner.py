@@ -33,7 +33,13 @@ def resolve_stages(
 def _build_metric_lookup_plan(
     router_result: RouterResult,
 ) -> tuple[list[str], dict[str, dict[str, object]], str]:
-    time_hint = router_result.entities.get("time_scope", "latest")
+    # 适配新 entities 结构：period_end 优先（新格式），fallback 到 time_scope 原文（旧格式）
+    entities = router_result.entities
+    period_end = str(entities.get("period_end") or "").strip()
+    time_scope_raw = str(entities.get("time_scope_raw") or "").strip()
+    # time_hint 传给 query_structured_data stage 作为 fallback
+    # 新格式：period_end 日期优先；旧格式：time_scope 原文
+    time_hint = period_end or time_scope_raw or "latest"
     stages = [
         StageName.QUERY_STRUCTURED_DATA.value,
         StageName.SYNTHESIZE_ANSWER.value,

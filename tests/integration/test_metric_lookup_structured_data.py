@@ -13,6 +13,7 @@ for candidate in (REPO_ROOT, BACKEND_SRC_ROOT):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
+from finsight_agent.capabilities.structured_data.metric_normalizer import MetricNormalizer
 from finsight_agent.capabilities.structured_data.models import MetricRecord
 from finsight_agent.capabilities.structured_data.repository import MetricRepository
 from finsight_agent.capabilities.structured_data.service import StructuredDataService
@@ -26,20 +27,22 @@ from shared.contracts.analysis_request import AnalysisRequest
 class MetricLookupStructuredDataIntegrationTest(unittest.TestCase):
     def test_metric_lookup_returns_real_metric_value_instead_of_todo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            repository = MetricRepository(storage_dir=Path(temp_dir) / "metric_store")
+            repository = MetricRepository(
+                sqlite_path=Path(temp_dir) / "metric_store" / "metrics.db"
+            )
             repository.save_records(
                 [
                     MetricRecord(
                         company_name="宁德时代",
                         company_code="300750",
                         metric_name="net_profit",
-                        metric_label="归母净利润",
-                        time_scope="2024_annual",
+                        metric_label="净利润",
+                        time_scope="期末余额",
                         period_end="2024-12-31",
                         value="507.45",
                         unit="亿元",
                         currency="CNY",
-                        source_type="local_filing_table",
+                        source_type="annual_report",
                         source_document_id="doc_001",
                         source_table_id="table_001",
                         source_caption="主要会计数据",
@@ -47,7 +50,13 @@ class MetricLookupStructuredDataIntegrationTest(unittest.TestCase):
                     )
                 ]
             )
-            structured_data_service = StructuredDataService(metric_repository=repository)
+            normalizer = MetricNormalizer(
+                aliases_path=Path(temp_dir) / "aliases.json",
+            )
+            structured_data_service = StructuredDataService(
+                metric_repository=repository,
+                normalizer=normalizer,
+            )
             orchestrator_service = OrchestratorService(
                 structured_data_service=structured_data_service
             )

@@ -58,7 +58,7 @@ class SparseRetrievalFacade:
         limit: int = 10,
         filters: SparseSearchFilters | None = None,
     ):
-        self.rebuild_index()
+        # 索引由调用方显式 rebuild_index() 维护，搜索时不重建（与 DenseRetrievalFacade 一致）
         return self._service.search(query_text=query_text, limit=limit, filters=filters)
 
 
@@ -100,7 +100,6 @@ class DenseRetrievalFacade:
         limit: int = 10,
         filters: DenseSearchFilters | None = None,
     ):
-        self.rebuild_index()
         return self._service.search(query_text=query_text, limit=limit, filters=filters)
 
     def close(self) -> None:
@@ -225,6 +224,7 @@ def build_dense_retrieval_facade() -> DenseRetrievalFacade:
     embedding_provider = BgeM3EmbeddingProvider(
         model_name=settings.retrieval.dense.embedding_model_name,
         model_version=settings.retrieval.dense.embedding_model_version,
+        use_real_model=True,
     )
     return DenseRetrievalFacade.from_paths(
         chunked_filings_root=settings.retrieval.chunked_filings_root,

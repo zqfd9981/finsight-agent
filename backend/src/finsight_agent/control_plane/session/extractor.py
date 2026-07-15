@@ -61,9 +61,10 @@ class SessionContextExtractor:
     ) -> str:
         entities = router_result.entities
         if router_result.intent == "metric_lookup":
-            company = str(entities.get("company") or "").strip()
-            time_scope = str(entities.get("time_scope") or "").strip()
-            metric = str(entities.get("metric") or "").strip()
+            # 适配新 entities 结构：用扁平字段（schema.py 已展开嵌套对象）
+            company = str(entities.get("company_name") or "").strip()
+            time_scope = str(entities.get("time_scope_raw") or "").strip()
+            metric = str(entities.get("metric_raw") or "").strip()
             topic = " ".join(part for part in (company, time_scope, metric) if part)
             return topic.strip()
 
@@ -96,7 +97,9 @@ class SessionContextExtractor:
     ) -> list[str]:
         candidates: list[str] = []
         target = str(router_result.entities.get("target") or "").strip()
-        company = str(router_result.entities.get("company") or "").strip()
+        # 适配新 entities 结构：company 可能是 dict（新格式）或字符串（旧格式）
+        # schema.py 已展开为扁平字段 company_name
+        company = str(router_result.entities.get("company_name") or "").strip()
 
         if target:
             candidates.extend(self._extract_companies(target))

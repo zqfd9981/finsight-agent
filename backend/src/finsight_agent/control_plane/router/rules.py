@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
+from pathlib import Path
 
 from shared.contracts.router_result import RouterResult
 from shared.contracts.session_context import SessionContext
@@ -8,13 +10,43 @@ from shared.enums.follow_up_type import FollowUpType
 from shared.enums.intent import Intent
 
 
-_COMPANY_PATTERN = re.compile(r"(宁德时代|贵州茅台|比亚迪|中远海能|招商轮船)")
+# 初始公司列表（动态加载的兜底，从 raw_filings 目录读取完整列表）
+_FALLBACK_COMPANIES = [
+    "宁德时代", "贵州茅台", "比亚迪", "中远海能", "招商轮船",
+    "TCL中环", "平安银行", "中兴通讯", "美的集团", "泸州老窖",
+]
 _YEAR_PATTERN = re.compile(r"(20\d{2})\s*年")
+# 路由层只识别关键词，返回中文原文，由 StructuredDataService 用 normalizer 映射到标准 key
 _METRIC_KEYWORDS = {
-    "净利润": "net_profit",
-    "营收": "revenue",
-    "收入": "revenue",
+    "净利润": "净利润",
+    "营收": "营业收入",
+    "营业收入": "营业收入",
+    "收入": "营业收入",
+    "总资产": "资产总计",
+    "资产总计": "资产总计",
+    "负债": "负债合计",
+    "现金流": "经营活动产生的现金流量净额",
+    "每股收益": "基本每股收益",
 }
+
+
+@lru_cache(maxsize=1)
+def _get_company_pattern() -> re.Pattern[str]:
+    """从 raw_filings 目录动态加载公司列表，构建匹配正则。"""
+    repo_root = Path(__file__).resolve().parents[5]
+    raw_root = repo_root / "var" / "data" / "raw_filings"
+    companies: list[str] = list(_FALLBACK_COMPANIES)
+    if raw_root.exists():
+        for d in raw_root.iterdir():
+            if not d.is_dir():
+                continue
+            parts = d.name.split("_", 1)
+            name = parts[1] if len(parts) > 1 else d.name
+            if name and name not in companies:
+                companies.append(name)
+    # 按长度降序排序，避免短名先匹配（如"长安汽车" vs "长安"）
+    companies.sort(key=len, reverse=True)
+    return re.compile("(" + "|".join(re.escape(c) for c in companies) + ")")
 
 
 def route_with_rules(
@@ -130,12 +162,36 @@ def _looks_like_metric_lookup(query: str) -> bool:
     return (
         _extract_company(query) is not None
         and _extract_metric(query) is not None
-        and any(token in query for token in ("多少", "是多少", "多大", "营收", "净利润"))
+        and any(token in query for token in ("多少", "是多少", "多大", "营收", "净利润", "资产", "负债", "现金流", "每股收益"))
     )
 
 
 def _looks_like_event_analysis(query: str) -> bool:
-    return any(keyword in query for keyword in ("利好哪些", "受益", "影响哪些", "航运公司", "板块"))
+    """识别事件影响分析类查询。
+
+    匹配模式：
+    - 受益/利好 + 板块/股票
+    - 对...有影响 / 影响...哪些
+    - 航运股/航运公司/油运股等板块关键词
+    - 局势/危机/事件 + 影响
+    """
+    # 直接关键词
+    direct_keywords = (
+        "利好哪些", "受益", "影响哪些", "航运公司", "板块",
+        "有影响", "影响如何", "受影响",
+    )
+    if any(keyword in query for keyword in direct_keywords):
+        return True
+    # 模式：事件类词 + 影响类词
+    event_words = ("局势", "危机", "冲突", "事件", "政策", "降息", "加息", "制裁")
+    impact_words = ("影响", "受益", "利好", "利空", "冲击")
+    if any(w in query for w in event_words) and any(w in query for w in impact_words):
+        return True
+    # 模式：板块/股票类词
+    sector_words = ("航运股", "油运股", "航运板块", "港口股", "军工股", "新能源车")
+    if any(w in query for w in sector_words):
+        return True
+    return False
 
 
 def _looks_like_evidence_lookup(
@@ -182,7 +238,7 @@ def _extract_topics(query: str) -> list[str]:
 
 
 def _extract_company(query: str) -> str | None:
-    match = _COMPANY_PATTERN.search(query)
+    match = _get_company_pattern().search(query)
     return match.group(1) if match else None
 
 
@@ -194,9 +250,18 @@ def _extract_metric(query: str) -> str | None:
 
 
 def _extract_metric_time_scope(query: str) -> str:
+    """从查询中提取时间范围。
+
+    转换规则：
+    - "2024年" → "2024年"（保留中文年份，用于匹配 DB time_scope 字段）
+      DB 的 time_scope 存的是表格列头（如"2024年"、"2023年"、"2024年12月31日"），
+      period_end 则全是报告截止日（2025年报的 period_end 都是 2024-12-31），
+      无法区分本年/上年。用 time_scope LIKE 匹配更准确。
+    - 无年份 → "latest"
+    """
     year_match = _YEAR_PATTERN.search(query)
     if year_match:
-        return f"{year_match.group(1)}_annual"
+        return year_match.group(1) + "年"
     return "latest"
 
 

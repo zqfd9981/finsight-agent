@@ -11,6 +11,14 @@ class MetricQuery:
     metric_name: str
     time_scope: str
     allow_external_fallback: bool = True
+    # 归一化前的原始中文 metric（如"净利润"），用于精确未命中时做 metric_label LIKE 兜底
+    metric_label_raw: str = ""
+    # 6 位 A 股代码（新格式 router 输出），DB 用 company_code 精确匹配；
+    # 空字符串则 fallback 到 company_name LIKE 匹配
+    company_code: str = ""
+    # period_end 日期（YYYY-MM-DD），新格式 router 输出，DB 用 period_end 字段精确匹配；
+    # 空字符串或 "latest" 走最新报告期排序
+    period_end: str = ""
 
 
 @dataclass(slots=True)
@@ -31,6 +39,11 @@ class MetricRecord:
     source_table_id: str
     source_caption: str
     confidence: str
+    # 报表口径：consolidated（合并）/ parent_only（母公司）/ unknown
+    statement_type: str = "unknown"
+    # 来源章节：balance_sheet/income_statement/cash_flow_statement/notes/equity_statement/unknown
+    # 用于查询时区分三表 vs 注释表，避免同名 key 碰撞
+    source_section: str = "unknown"
 
 
 @dataclass(slots=True)

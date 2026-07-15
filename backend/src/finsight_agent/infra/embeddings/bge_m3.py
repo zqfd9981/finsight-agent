@@ -35,12 +35,17 @@ class BgeM3EmbeddingProvider:
         self.model_version = model_version or self.model_version
         self._use_real_model = use_real_model
         self._model = None
+        self._vector_dim: int | None = None
+        if use_real_model:
+            self._model = self._load_model()
+            if self._model is None:
+                raise RuntimeError(
+                    f"无法加载 embedding 模型 {self.model_name}，请确认已下载到本地缓存"
+                )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        if self._use_real_model and self._model is None:
-            self._model = self._load_model()
         if self._model is not None:
             vectors = self._encode_with_model(texts)
             if vectors:
@@ -64,24 +69,46 @@ class BgeM3EmbeddingProvider:
             return None
 
         try:
-            return SentenceTransformer(self.model_name)
+            # GPU 优先：GTX 1650 4GB 显存 + batch_size=4 + 500 字截断可稳定运行（7 chunks/s）
+            # CPU 模式仅 0.3 chunks/s，9706 chunks 需 9 小时，不可行
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            return SentenceTransformer(self.model_name, device=device)
         except Exception:
             return None
 
     def _encode_with_model(self, texts: list[str]) -> list[list[float]]:
         if self._model is None:
             return []
+        # 截断到 500 字符：99% 的 chunk 本就 <600 字，几乎无损；
+        # 长文本在 GPU 上会 OOM、在 CPU 上极慢，截断后 GPU 7 chunks/s 稳定运行。
+        truncated = [t[:500] if len(t) > 500 else t for t in texts]
         encoded = self._model.encode(
-            texts,
+            truncated,
             normalize_embeddings=True,
             show_progress_bar=False,
+            batch_size=4,
         )
         return [list(map(float, row)) for row in encoded]
 
     @property
     def vector_dim(self) -> int:
-        """返回当前 provider 的默认向量维度。"""
-
+        """返回当前 provider 的向量维度，优先用模型实际维度。"""
+        if self._vector_dim is not None:
+            return self._vector_dim
+        if self._model is not None:
+            try:
+                # 新版 sentence-transformers 改名了方法
+                dim_fn = getattr(
+                    self._model,
+                    "get_embedding_dimension",
+                    getattr(self._model, "get_sentence_embedding_dimension", None),
+                )
+                if dim_fn is not None:
+                    self._vector_dim = dim_fn()
+                    return self._vector_dim
+            except Exception:
+                pass
         return 384
 
 
