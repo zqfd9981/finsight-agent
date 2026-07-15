@@ -15,6 +15,7 @@ from frontend.streamlit_app.api_client import WorkbenchApiClient
 from frontend.streamlit_app.pages.analysis_view import render_analysis_view
 from frontend.streamlit_app.pages.debug_view import render_debug_view
 from frontend.streamlit_app.pages.eval_view import render_eval_view
+from frontend.streamlit_app.theme import inject_theme
 
 
 PAGE_ANALYSIS = "分析视图"
@@ -26,9 +27,23 @@ def bootstrap_streamlit_app() -> None:
     """组装 set_page_config + 侧边栏页面选择 + 渲染分发。"""
 
     # set_page_config 必须是首个 st.* 调用；保持它在函数体内最顶部。
-    st.set_page_config(page_title="FinSight V1 Workbench", layout="wide")
-    st.title("FinSight V1 Workbench")
+    st.set_page_config(
+        page_title="FinSight Workbench",
+        page_icon="◈",
+        layout="wide",
+    )
+    inject_theme()
     client = WorkbenchApiClient()
+
+    st.markdown(
+        '<div class="fs-app-header">'
+        '<span class="fs-app-logo">◈</span>'
+        '<span class="fs-app-title">FinSight Workbench</span>'
+        '<span class="fs-app-sub">财务智能体 · 中间步骤可视化</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
     choice = st.sidebar.radio("页面", [PAGE_ANALYSIS, PAGE_DEBUG, PAGE_EVAL])
 
     if choice == PAGE_ANALYSIS:

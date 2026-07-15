@@ -9,9 +9,6 @@ from typing import Any
 import streamlit as st
 
 from frontend.streamlit_app.api_client import WorkbenchApiClient
-from frontend.streamlit_app.components.response_summary_card import (
-    build_response_summary_card_data,
-)
 from frontend.streamlit_app.state.workbench_state import (
     get_last_analysis_result,
     set_last_analysis_result,
@@ -21,16 +18,31 @@ from shared.contracts.analysis_stream_event import AnalysisStreamEvent
 
 
 STAGE_LABELS = {
-    "routing": "Routing",
-    "stage_planning": "Stage Planning",
-    "collect_event_context": "Collect event context",
-    "analyze_targets": "Analyze targets",
-    "rerank": "Rerank",
-    "retrieve_evidence": "Retrieve evidence",
-    "query_structured_data": "Query structured data",
-    "synthesize_brief_answer": "Synthesize brief answer",
-    "synthesize_event_answer": "Synthesize event answer",
-    "synthesize_report": "Synthesize report",
+    "routing": "路由分发",
+    "stage_planning": "阶段规划",
+    "collect_event_context": "事件上下文",
+    "analyze_targets": "目标分析",
+    "rerank": "重排序",
+    "retrieve_evidence": "证据检索",
+    "query_structured_data": "结构化数据查询",
+    "synthesize_brief_answer": "简答合成",
+    "synthesize_event_answer": "事件回答合成",
+    "synthesize_report": "报告合成",
+    "synthesize_answer": "回答合成",
+}
+
+STAGE_ICONS = {
+    "routing": "◎",
+    "stage_planning": "▦",
+    "collect_event_context": "◈",
+    "analyze_targets": "◆",
+    "rerank": "↕",
+    "retrieve_evidence": "⌕",
+    "query_structured_data": "▱",
+    "synthesize_brief_answer": "✦",
+    "synthesize_event_answer": "✦",
+    "synthesize_report": "✦",
+    "synthesize_answer": "✦",
 }
 
 
@@ -121,6 +133,7 @@ def build_stream_timeline_view(
                     event.stage_name,
                     event.stage_name.replace("_", " "),
                 ),
+                "icon": STAGE_ICONS.get(event.stage_name, "•"),
                 "status": "pending",
                 "message": "",
                 "started_at": None,
@@ -166,50 +179,278 @@ def build_stream_timeline_view(
     }
 
 
+def _render_stage_card_html(item: dict[str, Any]) -> str:
+    """渲染单个 stage 卡片为 HTML。"""
+    status = item.get("status", "pending")
+    label = item.get("label", "")
+    icon = item.get("icon", "•")
+    duration = _format_duration_ms(item.get("duration_ms"))
+    message = item.get("message", "")
+    stage_window = _format_stage_window(item.get("started_at"), item.get("finished_at"))
+
+    status_labels = {
+        "success": "完成",
+        "completed": "完成",
+        "running": "运行中",
+        "failed": "失败",
+        "partial": "部分",
+        "degraded": "降级",
+        "pending": "等待",
+    }
+    status_label = status_labels.get(status, status)
+
+    return f"""
+    <div class="fs-stage-card fs-status-{status}">
+        <div class="fs-stage-header">
+            <div class="fs-stage-name">{icon}&nbsp;&nbsp;{label}</div>
+            <div class="fs-stage-meta">
+                <span>{duration}</span>
+                <span>{stage_window}</span>
+                <span class="fs-stage-status fs-status-badge-{status}">{status_label}</span>
+            </div>
+        </div>
+        {f'<div class="fs-stage-body">{message}</div>' if message else ''}
+    </div>
+    """
+
+
 def _render_stream_timeline(
     placeholder,
     events: list[AnalysisStreamEvent],
 ) -> None:
     timeline = build_stream_timeline_view(events)
-    status_icon = {
-        "success": "ok",
-        "completed": "ok",
-        "running": "run",
-        "failed": "fail",
-        "partial": "warn",
-        "degraded": "warn",
-        "pending": "wait",
-    }
     current_stage = timeline["current_stage"]
+    total_ms = timeline["total_duration_ms"]
+    completed = timeline["completed_count"]
+    total_stages = len(timeline["stages"])
+
     with placeholder.container():
-        st.markdown("**Execution timeline**")
-        if current_stage:
-            st.caption(
-                f"Current stage: {STAGE_LABELS.get(current_stage, current_stage)}"
+        # 顶部摘要
+        cols = st.columns([1, 1, 1, 1])
+        with cols[0]:
+            st.markdown(
+                f'<div class="fs-section-title">执行进度</div>',
+                unsafe_allow_html=True,
             )
-        if timeline["total_duration_ms"] is not None:
-            st.caption(
-                f"Total elapsed: {_format_duration_ms(timeline['total_duration_ms'])}"
+        progress_pct = int(completed / total_stages * 100) if total_stages > 0 else 0
+        st.markdown(
+            f'<div class="fs-progress-track"><div class="fs-progress-bar" style="width: {progress_pct}%"></div></div>',
+            unsafe_allow_html=True,
+        )
+
+        meta_cols = st.columns(4)
+        with meta_cols[0]:
+            st.markdown(
+                f'<div style="font-family: JetBrains Mono; font-size: 11px; color: var(--fs-text-faint); text-transform: uppercase; letter-spacing: 0.1em;">当前阶段</div>'
+                f'<div style="font-family: JetBrains Mono; font-size: 14px; color: var(--fs-accent); font-weight: 600;">{STAGE_LABELS.get(current_stage, "—") if current_stage else "—"}</div>',
+                unsafe_allow_html=True,
             )
+        with meta_cols[1]:
+            st.markdown(
+                f'<div style="font-family: JetBrains Mono; font-size: 11px; color: var(--fs-text-faint); text-transform: uppercase; letter-spacing: 0.1em;">已完成</div>'
+                f'<div style="font-family: JetBrains Mono; font-size: 14px; color: var(--fs-text); font-weight: 600;">{completed} / {total_stages}</div>',
+                unsafe_allow_html=True,
+            )
+        with meta_cols[2]:
+            st.markdown(
+                f'<div style="font-family: JetBrains Mono; font-size: 11px; color: var(--fs-text-faint); text-transform: uppercase; letter-spacing: 0.1em;">总耗时</div>'
+                f'<div style="font-family: JetBrains Mono; font-size: 14px; color: var(--fs-text); font-weight: 600;">{_format_duration_ms(total_ms)}</div>',
+                unsafe_allow_html=True,
+            )
+        with meta_cols[3]:
+            run_status = timeline["run_status"]
+            status_colors = {"running": "var(--fs-accent)", "success": "var(--fs-success)", "failed": "var(--fs-error)", "idle": "var(--fs-text-faint)"}
+            st.markdown(
+                f'<div style="font-family: JetBrains Mono; font-size: 11px; color: var(--fs-text-faint); text-transform: uppercase; letter-spacing: 0.1em;">运行状态</div>'
+                f'<div style="font-family: JetBrains Mono; font-size: 14px; color: {status_colors.get(run_status, "var(--fs-text)")}; font-weight: 600;">{run_status}</div>',
+                unsafe_allow_html=True,
+            )
+
+        # stage 卡片列表
         if not timeline["stages"]:
-            st.caption("Waiting for backend events...")
-        for item in timeline["stages"]:
-            icon = status_icon.get(item["status"], item["status"])
-            stage_window = _format_stage_window(
-                item["started_at"],
-                item["finished_at"],
-            )
-            st.write(
-                f"- `{item['label']}` [{icon}] "
-                f"{_format_duration_ms(item['duration_ms'])} "
-                f"{stage_window} {item['message']}"
-            )
+            st.caption("等待后端事件...")
+        else:
+            cards_html = "".join(_render_stage_card_html(s) for s in timeline["stages"])
+            st.markdown(cards_html, unsafe_allow_html=True)
+
+
+def _render_structured_data_result(key_outputs: dict[str, Any]) -> None:
+    """渲染结构化数据查询结果（命中/未命中的醒目展示）。"""
+    if not key_outputs:
+        return
+
+    company = key_outputs.get("company", "")
+    metric = key_outputs.get("metric", "")
+    value = key_outputs.get("value", "")
+    unit = key_outputs.get("unit", "")
+    time_scope = key_outputs.get("time_scope", "")
+    is_degraded = key_outputs.get("is_degraded", True)
+    matched_by = key_outputs.get("matched_by", "")
+    source_summary = key_outputs.get("source_summary", "")
+    confidence = key_outputs.get("confidence", "")
+
+    if not is_degraded and value:
+        # 命中
+        st.markdown(
+            f"""
+            <div class="fs-metric-hit">
+                <div class="fs-metric-label">结构化数据 · 命中</div>
+                <div class="fs-metric-value">{value} {unit}</div>
+                <div class="fs-metric-source">
+                    公司: {company} &nbsp;|&nbsp; 指标: {metric} &nbsp;|&nbsp; 期间: {time_scope} &nbsp;|&nbsp; 匹配方式: {matched_by} &nbsp;|&nbsp; 置信度: {confidence}
+                </div>
+                {f'<div class="fs-metric-source">{source_summary}</div>' if source_summary else ''}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        # 未命中
+        st.markdown(
+            f"""
+            <div class="fs-metric-miss">
+                <div class="fs-metric-label">结构化数据 · 未命中</div>
+                <div class="fs-metric-value-miss">未找到匹配的结构化数据</div>
+                <div class="fs-metric-source">
+                    公司: {company} &nbsp;|&nbsp; 指标: {metric} &nbsp;|&nbsp; 期间: {time_scope}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def _render_stage_details(envelope: AnalysisResponseEnvelope) -> None:
+    """渲染每个 stage 的详细输出（基于 trace_blocks）。"""
+    st.markdown('<div class="fs-section-title">中间步骤详情</div>', unsafe_allow_html=True)
+
+    for block in envelope.trace_blocks:
+        if block.block_type == "routing":
+            _render_routing_block(block)
+        elif block.block_type == "stage_planning":
+            _render_stage_planning_block(block)
+        elif block.block_type == "execution":
+            _render_execution_block(block)
+
+
+def _render_routing_block(block) -> None:
+    """渲染路由结果。"""
+    payload = block.payload_summary
+    intent = payload.get("intent", "")
+    follow_up = payload.get("follow_up_type", "")
+    query_mode = payload.get("query_mode", "")
+
+    st.markdown(
+        f"""
+        <div class="fs-stage-card fs-status-success">
+            <div class="fs-stage-header">
+                <div class="fs-stage-name">◎&nbsp;&nbsp;路由分发</div>
+                <div class="fs-stage-meta">
+                    <span class="fs-stage-status fs-status-badge-success">完成</span>
+                </div>
+            </div>
+            <div class="fs-stage-body">
+                <div class="fs-kv"><span class="fs-kv-key">Intent</span><span class="fs-kv-val">{intent}</span></div>
+                <div class="fs-kv"><span class="fs-kv-key">Follow-up</span><span class="fs-kv-val">{follow_up}</span></div>
+                <div class="fs-kv"><span class="fs-kv-key">Query Mode</span><span class="fs-kv-val">{query_mode}</span></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_stage_planning_block(block) -> None:
+    """渲染阶段规划。"""
+    payload = block.payload_summary
+    stages = payload.get("stages", [])
+    response_mode = payload.get("response_mode", "")
+    stage_count = payload.get("stage_count", 0)
+
+    stages_text = " → ".join(stages) if stages else "—"
+
+    st.markdown(
+        f"""
+        <div class="fs-stage-card fs-status-success">
+            <div class="fs-stage-header">
+                <div class="fs-stage-name">▦&nbsp;&nbsp;阶段规划</div>
+                <div class="fs-stage-meta">
+                    <span class="fs-stage-status fs-status-badge-success">完成</span>
+                </div>
+            </div>
+            <div class="fs-stage-body">
+                <div class="fs-kv"><span class="fs-kv-key">Response Mode</span><span class="fs-kv-val">{response_mode}</span></div>
+                <div class="fs-kv"><span class="fs-kv-key">Stage Count</span><span class="fs-kv-val">{stage_count}</span></div>
+                <div class="fs-kv"><span class="fs-kv-key">Pipeline</span><span class="fs-kv-val">{stages_text}</span></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_execution_block(block) -> None:
+    """渲染执行结果——每个 stage 一个卡片。"""
+    payload = block.payload_summary
+    observations = payload.get("stage_observations", [])
+
+    for obs in observations:
+        stage_name = obs.get("stage_name", "")
+        status = obs.get("status", "pending")
+        key_outputs = obs.get("key_outputs", {})
+        evidence_refs = obs.get("evidence_refs", [])
+
+        label = STAGE_LABELS.get(stage_name, stage_name.replace("_", " "))
+        icon = STAGE_ICONS.get(stage_name, "•")
+        status_labels = {
+            "success": "完成", "completed": "完成", "running": "运行中",
+            "failed": "失败", "partial": "部分", "degraded": "降级", "pending": "等待",
+        }
+        status_label = status_labels.get(status, status)
+
+        # 构建 key_outputs 展示
+        kv_html = ""
+        if key_outputs:
+            for k, v in key_outputs.items():
+                if k in ("company", "metric", "value", "unit", "time_scope", "is_degraded",
+                         "matched_by", "source_summary", "confidence"):
+                    continue  # 这些字段在结构化数据卡片里单独展示
+                v_str = str(v) if v is not None else ""
+                if len(v_str) > 150:
+                    v_str = v_str[:150] + "..."
+                kv_html += f'<div class="fs-kv"><span class="fs-kv-key">{k}</span><span class="fs-kv-val">{v_str}</span></div>'
+
+        evidence_html = ""
+        if evidence_refs:
+            evidence_html = f'<div class="fs-kv"><span class="fs-kv-key">Evidence</span><span class="fs-kv-val">{len(evidence_refs)} 条</span></div>'
+
+        st.markdown(
+            f"""
+            <div class="fs-stage-card fs-status-{status}">
+                <div class="fs-stage-header">
+                    <div class="fs-stage-name">{icon}&nbsp;&nbsp;{label}</div>
+                    <div class="fs-stage-meta">
+                        <span class="fs-stage-status fs-status-badge-{status}">{status_label}</span>
+                    </div>
+                </div>
+                <div class="fs-stage-body">
+                    {kv_html}
+                    {evidence_html}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # 结构化数据查询结果特别展示
+        if stage_name == "query_structured_data":
+            _render_structured_data_result(key_outputs)
 
 
 def _render_report_blocks(report_blocks: list[dict[str, object]]) -> None:
     if not report_blocks:
         return
-    st.markdown("**Detailed result**")
+    st.markdown('<div class="fs-section-title">详细报告</div>', unsafe_allow_html=True)
     for block in report_blocks:
         title = str(block.get("title") or block.get("block_type") or "Result block")
         with st.expander(title, expanded=True):
@@ -232,35 +473,41 @@ def _render_report_blocks(report_blocks: list[dict[str, object]]) -> None:
 
 def _render_response_details(view: dict[str, object]) -> None:
     answer_markdown = str(view.get("answer_markdown") or "").strip()
+
+    st.markdown('<div class="fs-section-title">最终回答</div>', unsafe_allow_html=True)
+
     if answer_markdown:
-        st.markdown(answer_markdown)
+        st.markdown(
+            f'<div class="fs-answer-block"><div class="fs-answer-text">{answer_markdown}</div></div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.markdown(f"**Final response:** {view['summary']}")
+        st.markdown(
+            f'<div class="fs-answer-block"><div class="fs-answer-text">{view["summary"]}</div></div>',
+            unsafe_allow_html=True,
+        )
+
     _render_report_blocks(list(view.get("report_blocks") or []))
 
     uncertainty_notes = list(view.get("uncertainty_notes") or [])
     if uncertainty_notes:
-        st.markdown("**Uncertainty notes**")
+        st.markdown('<div class="fs-section-title">不确定性说明</div>', unsafe_allow_html=True)
         for note in uncertainty_notes:
-            st.write(f"- {note}")
+            st.markdown(f"- {note}")
 
     next_actions = list(view.get("next_actions") or [])
     if next_actions:
-        st.markdown("**Suggested next actions**")
+        st.markdown('<div class="fs-section-title">建议后续操作</div>', unsafe_allow_html=True)
         for action in next_actions:
-            st.write(f"- {action}")
-
-    if view.get("notes"):
-        st.caption(str(view["notes"]))
+            st.markdown(f"- {action}")
 
 
 def _render_response_preview(placeholder, envelope: AnalysisResponseEnvelope | None) -> None:
     with placeholder.container():
-        st.markdown("**Final response**")
         if envelope is None:
-            st.caption("Waiting for final response...")
             return
-        _render_response_details(build_analysis_view_model(envelope))
+        view = build_analysis_view_model(envelope)
+        _render_response_details(view)
 
 
 def _run_request_with_stream(
@@ -326,20 +573,26 @@ def _run_request_with_stream(
 
 
 def render_analysis_view(client: WorkbenchApiClient) -> None:
-    st.subheader("Analysis")
+    # 查询表单
+    st.markdown('<div class="fs-section-title">查询输入</div>', unsafe_allow_html=True)
     with st.form("analysis_run_form", clear_on_submit=False):
-        query = st.text_area("User query", value="", key="analysis_query")
-        session_id = st.text_input(
-            "Session id (optional for follow-up)",
-            value="",
-            key="analysis_session_id",
-        )
-        include_trace = st.checkbox(
-            "Include trace",
-            value=True,
-            key="analysis_include_trace",
-        )
-        submitted = st.form_submit_button("Run analysis")
+        query = st.text_area("User query", value="", key="analysis_query", height=68)
+        cols = st.columns([2, 2, 1])
+        with cols[0]:
+            session_id = st.text_input(
+                "Session id (可选, 用于追问)",
+                value="",
+                key="analysis_session_id",
+            )
+        with cols[1]:
+            include_trace = st.checkbox(
+                "包含 Trace (中间步骤)",
+                value=True,
+                key="analysis_include_trace",
+            )
+        with cols[2]:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            submitted = st.form_submit_button("▶ 执行分析")
 
     if submitted and query.strip():
         try:
@@ -352,32 +605,66 @@ def render_analysis_view(client: WorkbenchApiClient) -> None:
             set_last_analysis_result(st.session_state, envelope)
             st.session_state["_last_analysis_stream_events"] = events
             st.session_state["_last_analysis_error"] = None
+            # 重新渲染完整结果
+            st.rerun()
         except Exception as exc:  # noqa: BLE001
             st.session_state["_last_analysis_error"] = str(exc)
-            st.error(f"Backend request failed: {exc}")
+            st.error(f"后端请求失败: {exc}")
 
     error_msg = st.session_state.get("_last_analysis_error")
     if error_msg:
-        st.warning(f"Last request failed: {error_msg}")
+        st.warning(f"上次请求失败: {error_msg}")
 
     envelope = get_last_analysis_result(st.session_state)
     if envelope is not None:
         events = list(st.session_state.get("_last_analysis_stream_events") or [])
+
+        # 顶部摘要
+        view = build_analysis_view_model(envelope)
+        st.markdown('<div class="fs-section-title">执行摘要</div>', unsafe_allow_html=True)
+        summary_cols = st.columns(5)
+        with summary_cols[0]:
+            _render_summary_metric("Intent", view["intent"])
+        with summary_cols[1]:
+            _render_summary_metric("Response Type", view["response_type"])
+        with summary_cols[2]:
+            _render_summary_metric("Strategy", view["strategy"] or "—")
+        with summary_cols[3]:
+            _render_summary_metric("Evidence Refs", str(view["evidence_ref_count"]))
+        with summary_cols[4]:
+            _render_summary_metric("Session", str(view["session_id"])[:8] + "..." if view["session_id"] else "—")
+
+        # 执行时间线
         if events:
+            st.markdown('<div class="fs-section-title">执行时间线</div>', unsafe_allow_html=True)
             _render_stream_timeline(st.container(), events)
 
-        view = build_analysis_view_model(envelope)
-        card = build_response_summary_card_data(envelope)
-        st.markdown(f"**Session id:** `{card['session_id']}`")
-        st.markdown(f"**Response type:** `{card['response_type']}`")
-        st.markdown(
-            f"**Intent:** `{view['intent']}`  "
-            f"**Strategy:** `{view['strategy']}`  "
-            f"**Evidence refs:** {view['evidence_ref_count']}"
-        )
+        # 中间步骤详情
+        _render_stage_details(envelope)
+
+        # 最终回答
+        st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
         _render_response_details(view)
+
         if view["degraded"]:
-            st.warning("The latest result is degraded. Please review the timeline and traces.")
+            st.warning("⚠ 当前结果为降级状态，请检查时间线和 Trace 详情。")
+
+
+def _render_summary_metric(label: str, value: str) -> None:
+    st.markdown(
+        f"""
+        <div style="
+            background: var(--fs-bg-card);
+            border: 1px solid var(--fs-border);
+            border-radius: 6px;
+            padding: 12px 16px;
+        ">
+            <div style="font-family: JetBrains Mono; font-size: 10px; color: var(--fs-text-faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">{label}</div>
+            <div style="font-family: JetBrains Mono; font-size: 13px; color: var(--fs-text); font-weight: 600; word-break: break-all;">{value or '—'}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _utc_now_iso() -> str:
@@ -396,7 +683,7 @@ def _duration_between(started_at: str, finished_at: str) -> int:
 
 def _format_duration_ms(duration_ms: int | None) -> str:
     if duration_ms is None:
-        return "--"
+        return "—"
     if duration_ms >= 1000:
         return f"{duration_ms / 1000:.2f}s"
     return f"{duration_ms}ms"
@@ -409,9 +696,9 @@ def _format_stage_window(
     start_text = _format_clock(started_at)
     finish_text = _format_clock(finished_at)
     if start_text and finish_text:
-        return f"({start_text} -> {finish_text})"
+        return f"{start_text} → {finish_text}"
     if start_text:
-        return f"(started {start_text})"
+        return f"started {start_text}"
     return ""
 
 
