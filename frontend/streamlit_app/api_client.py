@@ -56,12 +56,14 @@ class WorkbenchApiClient:
         session_id: str | None = None,
         include_trace: bool = True,
         notes: str | None = None,
+        query_mode: str | None = None,
     ) -> AnalysisResponseEnvelope:
         request = self.build_request(
             query=query,
             session_id=session_id,
             include_trace=include_trace,
             notes=notes,
+            query_mode=query_mode,
         )
         response = requests.post(
             self._url(self.endpoint_path),
@@ -138,10 +140,14 @@ class WorkbenchApiClient:
         session_id: str | None = None,
         include_trace: bool = False,
         notes: str | None = None,
+        query_mode: str | None = None,
     ) -> AnalysisRequest:
+        # query_mode 未显式指定时，按 session_id 是否存在推断（保持旧逻辑兼容）
+        if query_mode is None:
+            query_mode = "follow_up" if session_id else "first_turn"
         return AnalysisRequest(
             query=query,
-            query_mode="follow_up" if session_id else "first_turn",
+            query_mode=query_mode,
             session_id=session_id,
             include_trace=include_trace,
             notes=notes,
@@ -175,6 +181,7 @@ class WorkbenchApiClient:
             turn_id=payload.get("turn_id", "turn_stub"),
             response=response,
             trace_blocks=[TraceBlock(**item) for item in trace_payloads],
+            evidence_index=payload.get("evidence_index") or {},
             notes=payload.get("notes"),
         )
 

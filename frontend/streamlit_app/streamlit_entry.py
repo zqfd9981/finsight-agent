@@ -13,11 +13,13 @@ import streamlit as st
 
 from frontend.streamlit_app.api_client import WorkbenchApiClient
 from frontend.streamlit_app.pages.analysis_view import render_analysis_view
+from frontend.streamlit_app.pages.chat_view import render_chat_view
 from frontend.streamlit_app.pages.debug_view import render_debug_view
 from frontend.streamlit_app.pages.eval_view import render_eval_view
 from frontend.streamlit_app.theme import inject_theme
 
 
+PAGE_CHAT = "对话视图"
 PAGE_ANALYSIS = "分析视图"
 PAGE_DEBUG = "调试视图"
 PAGE_EVAL = "评测视图"
@@ -44,9 +46,11 @@ def bootstrap_streamlit_app() -> None:
         unsafe_allow_html=True,
     )
 
-    choice = st.sidebar.radio("页面", [PAGE_ANALYSIS, PAGE_DEBUG, PAGE_EVAL])
+    choice = st.sidebar.radio("页面", [PAGE_CHAT, PAGE_ANALYSIS, PAGE_DEBUG, PAGE_EVAL])
 
-    if choice == PAGE_ANALYSIS:
+    if choice == PAGE_CHAT:
+        render_chat_view(client)
+    elif choice == PAGE_ANALYSIS:
         render_analysis_view(client)
     elif choice == PAGE_DEBUG:
         render_debug_view()

@@ -14,7 +14,13 @@ class FinalAnswerDraft:
 
 
 class FinalAnswerWriter:
-    """LLM-backed final answer generator with externally managed prompts."""
+    """LLM-backed final answer generator with externally managed prompts.
+
+    prompt 加载优先级：
+    1. PromptRegistry（集中 prompts/ 目录，按 ``reporting.{prompt_name}`` 查找）
+    2. system_prompt_path 参数（显式指定文件路径）
+    3. settings.reporting.prompts.final_answer_writer_system_prompt_path（旧配置兜底）
+    """
 
     def __init__(
         self,
@@ -23,14 +29,34 @@ class FinalAnswerWriter:
         system_prompt_path: Path | None = None,
         prompt_name: str = "final_answer_writer",
     ) -> None:
-        settings = load_settings()
-        resolved_prompt_path = (
-            system_prompt_path
-            or settings.reporting.prompts.final_answer_writer_system_prompt_path
+        self._system_prompt = self._load_system_prompt(
+            prompt_name=prompt_name,
+            system_prompt_path=system_prompt_path,
         )
-        self._system_prompt = resolved_prompt_path.read_text(encoding="utf-8")
         self._llm_client = llm_client or LlmClient()
         self._prompt_name = prompt_name
+
+    @staticmethod
+    def _load_system_prompt(
+        *,
+        prompt_name: str,
+        system_prompt_path: Path | None,
+    ) -> str:
+        """优先用 PromptRegistry，回退到文件路径配置。"""
+        # 1. 尝试 PromptRegistry（reporting.{prompt_name}）
+        try:
+            from finsight_agent.infra.llm.prompt_registry import get_prompt
+            return get_prompt(f"reporting.{prompt_name}").text
+        except Exception:
+            pass
+        # 2. 显式路径参数
+        if system_prompt_path is not None:
+            return system_prompt_path.read_text(encoding="utf-8")
+        # 3. settings 配置兜底
+        settings = load_settings()
+        return settings.reporting.prompts.final_answer_writer_system_prompt_path.read_text(
+            encoding="utf-8"
+        )
 
     def write_answer(
         self,

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from queue import Empty, Queue
 from threading import Thread
+import html
+import re
 import time
 from typing import Any
 
@@ -15,6 +17,7 @@ from frontend.streamlit_app.state.workbench_state import (
 )
 from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
 from shared.contracts.analysis_stream_event import AnalysisStreamEvent
+from shared.contracts.evidence_detail import SOURCE_TYPE_LABELS
 
 
 STAGE_LABELS = {
@@ -69,6 +72,7 @@ def _normalize_response_payload(
         "progress_state": str(getattr(response, "progress_state", "") or "").strip(),
         "trace_refs": list(getattr(response, "trace_refs", []) or []),
         "notes": getattr(response, "notes", None),
+        "evidence_index": dict(getattr(envelope, "evidence_index", None) or {}),
     }
 
 
@@ -324,13 +328,15 @@ def _render_stage_details(envelope: AnalysisResponseEnvelope) -> None:
     """渲染每个 stage 的详细输出（基于 trace_blocks）。"""
     st.markdown('<div class="fs-section-title">中间步骤详情</div>', unsafe_allow_html=True)
 
+    evidence_index = dict(getattr(envelope, "evidence_index", None) or {})
+
     for block in envelope.trace_blocks:
         if block.block_type == "routing":
             _render_routing_block(block)
         elif block.block_type == "stage_planning":
             _render_stage_planning_block(block)
         elif block.block_type == "execution":
-            _render_execution_block(block)
+            _render_execution_block(block, evidence_index=evidence_index)
 
 
 def _render_routing_block(block) -> None:
@@ -389,10 +395,11 @@ def _render_stage_planning_block(block) -> None:
     )
 
 
-def _render_execution_block(block) -> None:
+def _render_execution_block(block, evidence_index: dict[str, Any] | None = None) -> None:
     """渲染执行结果——每个 stage 一个卡片。"""
     payload = block.payload_summary
     observations = payload.get("stage_observations", [])
+    evidence_index = evidence_index or {}
 
     for obs in observations:
         stage_name = obs.get("stage_name", "")
@@ -420,9 +427,26 @@ def _render_execution_block(block) -> None:
                     v_str = v_str[:150] + "..."
                 kv_html += f'<div class="fs-kv"><span class="fs-kv-key">{k}</span><span class="fs-kv-val">{v_str}</span></div>'
 
+        # 证据引用：从 evidence_index 解析出来源标注（不再只显示「N 条」）
         evidence_html = ""
         if evidence_refs:
-            evidence_html = f'<div class="fs-kv"><span class="fs-kv-key">Evidence</span><span class="fs-kv-val">{len(evidence_refs)} 条</span></div>'
+            rows = []
+            for i, ref in enumerate(evidence_refs, 1):
+                detail = evidence_index.get(ref)
+                if detail:
+                    rows.append(_render_evidence_inline(i, detail))
+                else:
+                    rows.append(
+                        f'<div class="fs-evidence-inline">'
+                        f'<span class="fs-evidence-inline-idx">{i}</span>'
+                        f'<span class="fs-evidence-inline-body">{html.escape(str(ref))}</span>'
+                        f'</div>'
+                    )
+            evidence_html = (
+                f'<div class="fs-kv"><span class="fs-kv-key">Evidence</span>'
+                f'<span class="fs-kv-val">{len(evidence_refs)} 条</span></div>'
+                + "".join(rows)
+            )
 
         st.markdown(
             f"""
@@ -471,6 +495,167 @@ def _render_report_blocks(report_blocks: list[dict[str, object]]) -> None:
                     st.markdown(f"- {excerpt}")
 
 
+def _evidence_badge(source_type: str) -> str:
+    """来源类型徽章（HTML）。"""
+    label = SOURCE_TYPE_LABELS.get(source_type, source_type)
+    return (
+        f'<span class="fs-evidence-badge fs-evidence-badge-{html.escape(source_type)}">'
+        f'{html.escape(label)}</span>'
+    )
+
+
+def _evidence_meta_line(d: dict[str, Any]) -> str:
+    """按 source_type 拼出来源标注的元信息行。"""
+    source_type = d.get("source_type", "")
+    parts: list[str] = []
+    if source_type in ("annual_report", "filing"):
+        doc_type = str(d.get("doc_type") or "")
+        year = str(d.get("report_year") or "")
+        section = " / ".join(
+            str(s) for s in (d.get("section_path") or []) if str(s).strip()
+        )
+        pages = str(d.get("pages") or "")
+        if doc_type:
+            parts.append(html.escape(doc_type))
+        if year:
+            parts.append(html.escape(year))
+        if section:
+            parts.append(html.escape(section))
+        if pages:
+            parts.append(f"p{html.escape(pages)}")
+    elif source_type == "news":
+        src = str(d.get("source") or "")
+        date = str(d.get("publish_date") or "")
+        if src:
+            parts.append(html.escape(src))
+        if date:
+            parts.append(html.escape(date))
+    elif source_type == "structured_metric":
+        metric = str(d.get("metric") or "")
+        value = str(d.get("value") or "")
+        unit = str(d.get("unit") or "")
+        period = str(d.get("period") or "")
+        if metric:
+            parts.append(html.escape(metric))
+        if value:
+            parts.append(html.escape(f"{value} {unit}".strip()))
+        if period:
+            parts.append(html.escape(period))
+        matched = str(d.get("matched_by") or "")
+        if matched:
+            parts.append(f"匹配:{html.escape(matched)}")
+    return f'<span class="fs-evidence-sep">·</span>'.join(parts)
+
+
+def _render_evidence_card(d: dict[str, Any]) -> str:
+    """单条证据的来源标注卡片（参考来源面板用）。"""
+    source_type = d.get("source_type", "")
+    company = html.escape(str(d.get("company_name") or ""))
+    code = html.escape(str(d.get("company_code") or ""))
+    badge = _evidence_badge(source_type)
+
+    head_parts: list[str] = []
+    if company:
+        head_parts.append(f'<span class="fs-evidence-company">{company}</span>')
+    if code:
+        head_parts.append(f'<span class="fs-evidence-code">{code}</span>')
+    if head_parts:
+        head = "".join(head_parts)
+    else:
+        title = html.escape(str(d.get("title") or d.get("evidence_id") or ""))
+        head = f'<span class="fs-evidence-company">{title}</span>'
+
+    meta = _evidence_meta_line(d)
+    # 归一化 excerpt 空白（含换行）→ 单空格，避免原始文本里的空白行截断 HTML 块
+    excerpt = html.escape(re.sub(r"\s+", " ", str(d.get("excerpt") or "")).strip())
+    link_html = ""
+    url = str(d.get("url") or "")
+    if url:
+        link_html = (
+            f' &nbsp;<a class="fs-evidence-link" href="{html.escape(url)}" '
+            f'target="_blank" rel="noopener">原文↗</a>'
+        )
+
+    # 注意：必须紧凑无空行——CommonMark 的 <div> HTML 块遇到空白行会结束，
+    # 否则卡片之间出现空行会导致后续内容被当成原始文本显示（“html片段”）。
+    parts = [
+        '<div class="fs-evidence-card">',
+        f'<div class="fs-evidence-head">{badge}{head}{link_html}</div>',
+        f'<div class="fs-evidence-meta">{meta}</div>',
+    ]
+    if excerpt:
+        parts.append(f'<div class="fs-evidence-excerpt">{excerpt}</div>')
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _render_evidence_inline(i: int, d: dict[str, Any]) -> str:
+    """中间节点内单条证据的来源标注行。"""
+    source_type = d.get("source_type", "")
+    if source_type in ("annual_report", "filing"):
+        company = str(d.get("company_name") or "")
+        code = str(d.get("company_code") or "")
+        doc_type = str(d.get("doc_type") or "")
+        pages = str(d.get("pages") or "")
+        section = " / ".join(
+            str(s) for s in (d.get("section_path") or []) if str(s).strip()
+        )
+        bits = [b for b in (company, f"({code})" if code else "", doc_type, section,
+                             f"p{pages}" if pages else "") if b]
+        body = " · ".join(html.escape(b) for b in bits)
+    elif source_type == "news":
+        title = str(d.get("title") or "")
+        src = str(d.get("source") or "")
+        date = str(d.get("publish_date") or "")
+        url = str(d.get("url") or "")
+        body = " · ".join(html.escape(b) for b in (title, src, date) if b)
+        if url:
+            body += f' &nbsp;<a href="{html.escape(url)}" target="_blank" rel="noopener">↗</a>'
+    elif source_type == "structured_metric":
+        company = str(d.get("company_name") or "")
+        metric = str(d.get("metric") or "")
+        value = str(d.get("value") or "")
+        unit = str(d.get("unit") or "")
+        period = str(d.get("period") or "")
+        bits = [b for b in (company, metric, f"{value} {unit}".strip() if value else "",
+                             period) if b]
+        body = " · ".join(html.escape(b) for b in bits)
+    else:
+        body = html.escape(str(d.get("evidence_id") or ""))
+    return (
+        f'<div class="fs-evidence-inline">'
+        f'<span class="fs-evidence-inline-idx">{i}</span>'
+        f'<span class="fs-evidence-inline-body">{body}</span>'
+        f'</div>'
+    )
+
+
+def _render_evidence_sources(evidence_index: dict[str, Any]) -> None:
+    """渲染「参考来源」面板：把 evidence_index 按来源类型分组展示来源标注。"""
+    if not evidence_index:
+        return
+    st.markdown(
+        '<div class="fs-section-title">参考来源 · 来源标注</div>',
+        unsafe_allow_html=True,
+    )
+    order = {"annual_report": 0, "filing": 1, "structured_metric": 2, "news": 3}
+    items = sorted(
+        evidence_index.values(),
+        key=lambda d: (
+            order.get(d.get("source_type", ""), 9),
+            str(d.get("company_name") or ""),
+            str(d.get("evidence_id") or ""),
+        ),
+    )
+    cards = "".join(_render_evidence_card(d) for d in items)
+    # 防御：CommonMark 的 <div> HTML 块遇空白行会截断，压缩掉空白行避免“html片段”
+    cards = re.sub(r"\n[ \t]*\n", "\n", cards)
+    st.markdown(
+        f'<div class="fs-evidence-panel">{cards}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _render_response_details(view: dict[str, object]) -> None:
     answer_markdown = str(view.get("answer_markdown") or "").strip()
 
@@ -486,6 +671,9 @@ def _render_response_details(view: dict[str, object]) -> None:
             f'<div class="fs-answer-block"><div class="fs-answer-text">{view["summary"]}</div></div>',
             unsafe_allow_html=True,
         )
+
+    # 参考来源标注（年报 RAG / 事件新闻 / 结构化指标统一溯源）
+    _render_evidence_sources(view.get("evidence_index") or {})
 
     _render_report_blocks(list(view.get("report_blocks") or []))
 

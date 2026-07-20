@@ -8,16 +8,20 @@ from typing import Any
 
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.analysis_response_envelope import AnalysisResponseEnvelope
-from shared.contracts.trace_block import TraceBlock
 from shared.enums.intent import Intent
 
 from finsight_agent.control_plane.orchestrator.retrieval_strategy_classifier import (
     StubRetrievalStrategyClassifier,
 )
 from finsight_agent.control_plane.orchestrator.service import OrchestratorService
-from finsight_agent.control_plane.orchestrator.stage_planner import resolve_stages
+from finsight_agent.control_plane.orchestrator.llm_strategy_classifier import (
+    LlmRetrievalStrategyClassifier,
+)
 from finsight_agent.control_plane.orchestrator.trained_strategy_classifier import (
     TrainedRetrievalStrategyClassifier,
+)
+from finsight_agent.control_plane.orchestrator.evidence_index_builder import (
+    build_evidence_index,
 )
 from finsight_agent.control_plane.router.service import RouterService
 from finsight_agent.control_plane.session.service import SessionService
@@ -52,8 +56,11 @@ class WorkbenchBackendApiService:
         self._session_service = session_service or SessionService()
         self._retrieval_strategy_classifier = (
             retrieval_strategy_classifier
-            or TrainedRetrievalStrategyClassifier(
-                fallback=StubRetrievalStrategyClassifier(),
+            or LlmRetrievalStrategyClassifier(
+                llm_client=self._llm_client,
+                fallback=TrainedRetrievalStrategyClassifier(
+                    fallback=StubRetrievalStrategyClassifier(),
+                ),
             )
         )
 
@@ -96,73 +103,16 @@ class WorkbenchBackendApiService:
             event_callback=event_callback,
             run_id=run_id,
         )
-        if emitter is not None:
-            emitter.emit_run_started()
-
         current_stage_name = ""
         current_stage_started_at: str | None = None
         session_id = request.session_id or self._build_session_id()
 
         try:
             with bind_active_run_event_emitter(emitter):
-                session_context = self._session_service.load_context(request.session_id)
-
-                current_stage_name = "routing"
-                current_stage_started_at = self._emit_stage_started(
-                    emitter=emitter,
-                    stage_name=current_stage_name,
-                    message="Routing started",
-                )
-                router_result = self._router_service.route(
-                    query=request.query,
-                    session_context=session_context,
-                )
-                self._emit_stage_finished(
-                    emitter=emitter,
-                    stage_name=current_stage_name,
-                    started_at=current_stage_started_at,
-                    status="success",
-                    message="Routing finished",
-                    payload={
-                        "intent": router_result.intent,
-                        "follow_up_type": router_result.follow_up_type,
-                        "confidence": router_result.confidence,
-                    },
-                )
-
-                current_stage_name = "stage_planning"
-                current_stage_started_at = self._emit_stage_started(
-                    emitter=emitter,
-                    stage_name=current_stage_name,
-                    message="Stage planning started",
-                )
-                strategy_payload = self._classify_event_strategy(
-                    query=request.query,
-                    router_result=router_result,
-                    session_context=session_context,
-                )
-                stages, stage_constraints, response_mode = resolve_stages(
-                    router_result,
-                    strategy_payload=strategy_payload,
-                )
-                self._emit_stage_finished(
-                    emitter=emitter,
-                    stage_name=current_stage_name,
-                    started_at=current_stage_started_at,
-                    status="success",
-                    message="Stage planning finished",
-                    payload={
-                        "intent": router_result.intent,
-                        "stages": list(stages),
-                        "response_mode": response_mode,
-                        "strategy": (
-                            strategy_payload.get("strategy", "")
-                            if strategy_payload is not None
-                            else ""
-                        ),
-                    },
-                )
-
+                # ── LangGraph 编排路径（唯一路径）──
+                # 全流程委托给 OrchestratorService.execute_graph，router/classify/plan/
+                # stage 执行/trace/snapshot 都在图内完成（run_started 由 execute_graph 内部发射）。
+                # session_context 由图内 load_session 节点加载，这里不再预先 load（去重）。
                 normalized_request = AnalysisRequest(
                     query=request.query,
                     query_mode=request.query_mode,
@@ -170,27 +120,14 @@ class WorkbenchBackendApiService:
                     include_trace=request.include_trace,
                     notes=request.notes,
                 )
-                current_stage_name = "execution"
-                current_stage_started_at = None
-                orchestration_result = self._orchestrator_service.execute(
+                orchestration_result = self._orchestrator_service.execute_graph(
                     request=normalized_request,
-                    router_result=router_result,
-                    stages=stages,
-                    stage_constraints=stage_constraints,
-                    response_mode=response_mode,
-                    session_context=session_context,
+                    session_context=None,
                     event_callback=event_callback,
+                    router_service=self._router_service,
+                    session_service=self._session_service,
+                    strategy_classifier=self._retrieval_strategy_classifier,
                 )
-
-                snapshot = self._session_service.build_snapshot(
-                    request=normalized_request,
-                    router_result=router_result,
-                    stages=stages,
-                    orchestration_result=orchestration_result,
-                )
-                if snapshot is not None:
-                    self._session_service.save_snapshot(snapshot)
-
                 envelope = AnalysisResponseEnvelope(
                     session_id=session_id,
                     turn_id="turn_stub",
@@ -198,14 +135,8 @@ class WorkbenchBackendApiService:
                         orchestration_result.final_response
                         or orchestration_result.guardrail_response
                     ),
-                    trace_blocks=self._build_trace_blocks(
-                        request=request,
-                        router_result=router_result,
-                        stages=stages,
-                        response_mode=response_mode,
-                        orchestration_result=orchestration_result,
-                        strategy_payload=strategy_payload,
-                    ),
+                    trace_blocks=orchestration_result.trace_blocks,
+                    evidence_index=build_evidence_index(orchestration_result),
                 )
                 if emitter is not None:
                     emitter.emit_run_finished(
@@ -224,57 +155,6 @@ class WorkbenchBackendApiService:
             if raise_on_error:
                 raise
             return AnalysisResponseEnvelope(session_id=session_id)
-
-    def _build_trace_blocks(
-        self,
-        *,
-        request: AnalysisRequest,
-        router_result,
-        stages: list[str],
-        response_mode: str,
-        orchestration_result,
-        strategy_payload: dict[str, str] | None,
-    ) -> list[TraceBlock]:
-        trace_blocks: list[TraceBlock] = []
-        if not request.include_trace:
-            return trace_blocks
-
-        trace_blocks.append(
-            TraceBlock(
-                block_type="routing",
-                title="路由结果",
-                status="success",
-                payload_summary={
-                    "intent": router_result.intent,
-                    "follow_up_type": router_result.follow_up_type,
-                    "query_mode": request.query_mode,
-                },
-                raw_refs=[router_result.intent],
-            )
-        )
-        stage_planning_summary = {
-            "intent": router_result.intent,
-            "stage_count": len(stages),
-            "stages": list(stages),
-            "response_mode": response_mode,
-        }
-        if strategy_payload is not None:
-            stage_planning_summary["strategy"] = strategy_payload.get("strategy", "")
-            stage_planning_summary["strategy_confidence"] = strategy_payload.get(
-                "confidence", ""
-            )
-        trace_blocks.append(
-            TraceBlock(
-                block_type="stage_planning",
-                title="阶段计划结果",
-                status="success",
-                payload_summary=stage_planning_summary,
-                raw_refs=list(stages),
-            )
-        )
-        trace_blocks.extend(orchestration_result.trace_blocks)
-        return trace_blocks
-
     def _build_event_emitter(
         self,
         *,
@@ -328,35 +208,3 @@ class WorkbenchBackendApiService:
         import uuid
 
         return f"run_{uuid.uuid4().hex[:8]}"
-
-    def _classify_event_strategy(
-        self,
-        *,
-        query: str,
-        router_result,
-        session_context,
-    ) -> dict[str, str] | None:
-        if router_result.intent != Intent.EVENT_IMPACT_ANALYSIS.value:
-            return None
-
-        session_topic = ""
-        if session_context is not None:
-            session_topic = str(session_context.active_topic or "").strip()
-
-        payload = self._retrieval_strategy_classifier.classify(
-            query=query,
-            router_payload={
-                "intent": router_result.intent,
-                "follow_up_type": router_result.follow_up_type,
-                "confidence": router_result.confidence,
-                "entities": router_result.entities,
-                "needs": router_result.needs,
-                "constraints": router_result.constraints,
-            },
-            session_topic=session_topic,
-        )
-        return {
-            "strategy": str(payload.get("strategy") or "").strip(),
-            "confidence": str(payload.get("confidence") or "").strip(),
-            "reason": str(payload.get("reason") or "").strip(),
-        }

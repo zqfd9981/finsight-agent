@@ -19,6 +19,7 @@ from finsight_agent.capabilities.retrieval.models import (
     RetrievalResult,
     RetrievalScoreBreakdown,
 )
+from finsight_agent.capabilities.structured_data.models import StructuredQueryResult
 from finsight_agent.control_plane.orchestrator.models import StageExecutionResult
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.report_block import EvidenceOverviewBlock, EvidenceOverviewItem
@@ -36,6 +37,9 @@ class _StubStructuredDataService:
         company: str,
         metric: str,
         time_scope: str,
+        company_code: str = "",
+        metric_raw: str = "",
+        metric_type: str = "direct",
     ) -> dict[str, str]:
         self.calls.append((company, metric, time_scope))
         return {
@@ -44,6 +48,16 @@ class _StubStructuredDataService:
             "time_scope": time_scope,
             "value": "123.45",
         }
+
+    def query_via_assembler(self, entities: dict) -> StructuredQueryResult:
+        # 桩：assembler 未命中（degraded），使 stage 回落到 query_metric_lookup，
+        # 保留原测试断言（value=123.45 来自 query_metric_lookup）
+        return StructuredQueryResult(
+            records=[],
+            sql_used="-- stub",
+            via="fallback",
+            is_degraded=True,
+        )
 
 
 class _StubRetrievalFacade:

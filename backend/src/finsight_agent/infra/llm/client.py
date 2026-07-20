@@ -55,8 +55,10 @@ class LlmClient:
         self._max_retries = max_retries or int(
             os.getenv("FINSIGHT_LLM_MAX_RETRIES", "3")
         )
+        # 30s 硬约束：前端 read timeout=120s，单次 LLM 最坏 30+1.5+30+3+30=94.5s
+        # 留出 ~25s 给其他 stage 串行执行。原默认 60s 违反 project_memory 硬约束。
         self._timeout_seconds = timeout_seconds or float(
-            os.getenv("FINSIGHT_LLM_TIMEOUT_SECONDS", "60")
+            os.getenv("FINSIGHT_LLM_TIMEOUT_SECONDS", "30")
         )
 
     def complete_json(

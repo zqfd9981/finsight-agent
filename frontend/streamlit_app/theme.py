@@ -413,6 +413,186 @@ hr {
     font-size: 13px;
     line-height: 1.6;
 }
+
+/* ── Chat 视图专属样式 ── */
+.fs-chat-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 20px;
+    text-align: center;
+}
+.fs-chat-welcome-logo {
+    font-size: 48px;
+    color: var(--fs-accent);
+    margin-bottom: 16px;
+}
+.fs-chat-welcome-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--fs-text);
+    margin-bottom: 12px;
+}
+.fs-chat-welcome-sub {
+    font-family: 'Manrope', sans-serif;
+    font-size: 14px;
+    color: var(--fs-text-faint);
+    line-height: 1.6;
+}
+
+.fs-chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid rgba(232, 176, 87, 0.15);
+}
+.fs-chat-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fs-text);
+}
+.fs-chat-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--fs-text-faint);
+}
+
+.fs-chat-session-list {
+    margin-top: 12px;
+}
+.fs-chat-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--fs-text-faint);
+    font-size: 13px;
+    font-family: 'Manrope', sans-serif;
+}
+
+/* 结构化数据命中大数字 */
+.fs-structured-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--fs-success);
+    margin: 8px 0 12px 0;
+}
+.fs-structured-unit {
+    font-size: 14px;
+    color: var(--fs-text-faint);
+    font-weight: 400;
+    margin-left: 4px;
+}
+
+/* ===== 证据来源标注（参考来源面板 + 节点内联标注） ===== */
+.fs-evidence-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 16px;
+}
+.fs-evidence-card {
+    background: var(--fs-bg-card);
+    border: 1px solid var(--fs-border);
+    border-left: 3px solid var(--fs-accent);
+    border-radius: 6px;
+    padding: 12px 16px;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+.fs-evidence-card:hover {
+    border-color: var(--fs-border-bright);
+    background: var(--fs-bg-hover);
+}
+.fs-evidence-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+.fs-evidence-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+.fs-evidence-badge-annual_report,
+.fs-evidence-badge-filing { background: var(--fs-success-bg); color: var(--fs-success); }
+.fs-evidence-badge-news { background: var(--fs-info-bg); color: var(--fs-info); }
+.fs-evidence-badge-structured_metric { background: rgba(232, 176, 87, 0.12); color: var(--fs-accent); }
+.fs-evidence-company {
+    font-family: 'Manrope', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--fs-text);
+}
+.fs-evidence-code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fs-text-faint);
+}
+.fs-evidence-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fs-text-dim);
+    line-height: 1.7;
+    word-break: break-word;
+}
+.fs-evidence-meta .fs-evidence-sep {
+    color: var(--fs-text-faint);
+    margin: 0 6px;
+}
+.fs-evidence-excerpt {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--fs-text-dim);
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.fs-evidence-link {
+    color: var(--fs-info);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--fs-info);
+}
+.fs-evidence-link:hover { color: #93c5fd; }
+
+/* 中间节点内的单条证据标注行 */
+.fs-evidence-inline {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.fs-evidence-inline:first-child { border-top: none; }
+.fs-evidence-inline-idx {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fs-accent);
+    min-width: 18px;
+}
+.fs-evidence-inline-body {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fs-text-dim);
+    line-height: 1.6;
+    word-break: break-word;
+}
+.fs-evidence-inline-body a { color: var(--fs-info); text-decoration: none; }
 </style>
 """
 

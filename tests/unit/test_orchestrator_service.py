@@ -19,6 +19,7 @@ from finsight_agent.control_plane.orchestrator.models import (
 from finsight_agent.control_plane.orchestrator.observation_builder import (
     build_stage_observation,
 )
+from finsight_agent.capabilities.structured_data.models import StructuredQueryResult
 from finsight_agent.control_plane.orchestrator.service import OrchestratorService
 from shared.contracts.analysis_request import AnalysisRequest
 from shared.contracts.analysis_stream_event import AnalysisStreamEvent
@@ -37,6 +38,15 @@ class StubStructuredDataService:
             "time_scope": time_scope,
             "value": "123.45 亿元",
         }
+
+    def query_via_assembler(self, entities: dict) -> "StructuredQueryResult":
+        # 镜像真实 StructuredDataService 的查询入口；此处返回最小合法结果，
+        # 仅用于让 orchestrator 两阶段编排测试不依赖真实 DB / LLM。
+        return StructuredQueryResult(
+            records=[],
+            sql_used="-- stub",
+            via="assembler",
+        )
 
 
 class StubReportingService:
@@ -205,6 +215,48 @@ class StubTargetAnalysisService:
         }
 
 
+class StubRouterService:
+    """返回预设 router_result，避免触发真实 RouterService / LLM。"""
+
+    def __init__(self, router_result: "RouterResult") -> None:
+        self._router_result = router_result
+
+    def route(self, *, query: str, session_context=None) -> "RouterResult":
+        del query, session_context
+        return self._router_result
+
+
+class StubStrategyClassifier:
+    """返回固定策略，避免触发真实 LLM strategy 分类器。"""
+
+    def __init__(self, strategy: str) -> None:
+        self._strategy = strategy
+
+    def classify(self, *, query: str, router_payload: dict, session_topic: str) -> dict:
+        del query, router_payload, session_topic
+        return {
+            "strategy": self._strategy,
+            "confidence": "high",
+            "reason": "stub",
+        }
+
+
+class StubSessionService:
+    """避免触发真实 SessionService（可能依赖 DB / 快照存储）。"""
+
+    def load_context(self, session_id: str):
+        del session_id
+        return None
+
+    def build_snapshot(self, **kwargs):
+        del kwargs
+        return None
+
+    def save_snapshot(self, snapshot) -> None:
+        del snapshot
+        return None
+
+
 class OrchestratorModelsTest(unittest.TestCase):
     def test_stage_execution_result_exposes_expected_fields(self) -> None:
         result = StageExecutionResult(
@@ -284,30 +336,17 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
             needs=["structured_data_query"],
             constraints={"preferred_output": "brief_answer"},
         )
-        stages = [
-            StageName.QUERY_STRUCTURED_DATA.value,
-            StageName.SYNTHESIZE_ANSWER.value,
-        ]
-        stage_constraints = {
-            StageName.QUERY_STRUCTURED_DATA.value: {"time_hint": "2024_annual"},
-            StageName.SYNTHESIZE_ANSWER.value: {
-                "response_mode": "brief_answer",
-                "preferred_output": "brief_answer",
-            },
-        }
-        response_mode = "brief_answer"
 
-        result = self.service.execute(
+        result = self.service.execute_graph(
             request=AnalysisRequest(
                 query="宁德时代 2024 年净利润是多少？",
                 session_id="sess_001",
                 include_trace=True,
             ),
-            router_result=router_result,
-            stages=stages,
-            stage_constraints=stage_constraints,
-            response_mode=response_mode,
             session_context=None,
+            router_service=StubRouterService(router_result),
+            strategy_classifier=StubStrategyClassifier("event_primary"),
+            session_service=StubSessionService(),
         )
 
         self.assertIsNotNone(result.final_response)
@@ -315,7 +354,9 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
             [item.stage_name for item in result.stage_observations],
             [
                 StageName.QUERY_STRUCTURED_DATA.value,
+                StageName.REFLECT_AND_REQUERY.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
 
@@ -332,33 +373,17 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
             needs=["news_search"],
             constraints={"preferred_output": "report"},
         )
-        stages = [
-            StageName.COLLECT_EVENT_CONTEXT.value,
-            StageName.SYNTHESIZE_ANSWER.value,
-        ]
-        stage_constraints = {
-            StageName.COLLECT_EVENT_CONTEXT.value: {
-                "retrieval_budget": 3,
-                "strategy": "event_primary",
-            },
-            StageName.SYNTHESIZE_ANSWER.value: {
-                "response_mode": "event_answer",
-                "preferred_output": "brief_answer",
-            },
-        }
-        response_mode = "event_answer"
 
-        result = self.service.execute(
+        result = self.service.execute_graph(
             request=AnalysisRequest(
                 query="红海局势升级对A股哪些板块有影响？",
                 session_id="sess_001",
                 include_trace=True,
             ),
-            router_result=router_result,
-            stages=stages,
-            stage_constraints=stage_constraints,
-            response_mode=response_mode,
             session_context=None,
+            router_service=StubRouterService(router_result),
+            strategy_classifier=StubStrategyClassifier("event_primary"),
+            session_service=StubSessionService(),
         )
 
         self.assertIsNotNone(result.final_response)
@@ -367,6 +392,7 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
             [
                 StageName.COLLECT_EVENT_CONTEXT.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
         self.assertEqual(
@@ -387,37 +413,17 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
             needs=["news_search"],
             constraints={"preferred_output": "report"},
         )
-        stages = [
-            StageName.COLLECT_EVENT_CONTEXT.value,
-            StageName.ANALYZE_TARGETS.value,
-            StageName.RETRIEVE_EVIDENCE.value,
-            StageName.SYNTHESIZE_ANSWER.value,
-        ]
-        stage_constraints = {
-            StageName.COLLECT_EVENT_CONTEXT.value: {
-                "retrieval_budget": 3,
-                "strategy": "dual_primary",
-            },
-            StageName.ANALYZE_TARGETS.value: {"candidate_discovery_budget": 1},
-            StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 4},
-            StageName.SYNTHESIZE_ANSWER.value: {
-                "response_mode": "report",
-                "preferred_output": "report",
-            },
-        }
-        response_mode = "report"
 
-        result = self.service.execute(
+        result = self.service.execute_graph(
             request=AnalysisRequest(
                 query="红海局势升级利好哪些A股航运股？",
                 session_id="sess_001",
                 include_trace=True,
             ),
-            router_result=router_result,
-            stages=stages,
-            stage_constraints=stage_constraints,
-            response_mode=response_mode,
             session_context=None,
+            router_service=StubRouterService(router_result),
+            strategy_classifier=StubStrategyClassifier("dual_primary"),
+            session_service=StubSessionService(),
         )
 
         self.assertIsNotNone(result.final_response)
@@ -428,6 +434,7 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
                 StageName.ANALYZE_TARGETS.value,
                 StageName.RETRIEVE_EVIDENCE.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
         self.assertEqual(
@@ -448,45 +455,34 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
             needs=["news_search"],
             constraints={"preferred_output": "report"},
         )
-        stages = [
-            StageName.COLLECT_EVENT_CONTEXT.value,
-            StageName.ANALYZE_TARGETS.value,
-            StageName.RETRIEVE_EVIDENCE.value,
-            StageName.SYNTHESIZE_ANSWER.value,
-        ]
-        stage_constraints = {
-            StageName.COLLECT_EVENT_CONTEXT.value: {
-                "retrieval_budget": 3,
-                "strategy": "dual_primary",
-            },
-            StageName.ANALYZE_TARGETS.value: {"candidate_discovery_budget": 1},
-            StageName.RETRIEVE_EVIDENCE.value: {"retrieval_budget": 4},
-            StageName.SYNTHESIZE_ANSWER.value: {
-                "response_mode": "report",
-                "preferred_output": "report",
-            },
-        }
-        response_mode = "report"
         captured: list[AnalysisStreamEvent] = []
 
-        self.service.execute(
+        self.service.execute_graph(
             request=AnalysisRequest(
                 query="红海局势升级利好哪些A股航运股？",
                 session_id="sess_001",
                 include_trace=True,
             ),
-            router_result=router_result,
-            stages=stages,
-            stage_constraints=stage_constraints,
-            response_mode=response_mode,
             session_context=None,
             event_callback=captured.append,
+            router_service=StubRouterService(router_result),
+            strategy_classifier=StubStrategyClassifier("dual_primary"),
+            session_service=StubSessionService(),
         )
 
+        # 只筛选真实执行 stage 节点（排除 load_session/route/plan_stages/build_trace
+        # 等编排节点），按执行顺序校验 started/finished 事件。
+        exec_stage_names = {
+            StageName.COLLECT_EVENT_CONTEXT.value,
+            StageName.ANALYZE_TARGETS.value,
+            StageName.RETRIEVE_EVIDENCE.value,
+            StageName.SYNTHESIZE_ANSWER.value,
+            StageName.VERIFY_ANSWER.value,
+        }
         stage_events = [
             (item.event_type, item.stage_name, item.status)
             for item in captured
-            if item.event_type.startswith("stage_")
+            if item.event_type.startswith("stage_") and item.stage_name in exec_stage_names
         ]
         self.assertEqual(
             stage_events,
@@ -499,6 +495,8 @@ class OrchestratorServiceExecutionTest(unittest.TestCase):
                 ("stage_finished", "retrieve_evidence", "success"),
                 ("stage_started", "synthesize_answer", "running"),
                 ("stage_finished", "synthesize_answer", "success"),
+                ("stage_started", "verify_answer", "running"),
+                ("stage_finished", "verify_answer", "success"),
             ],
         )
         self.assertTrue(

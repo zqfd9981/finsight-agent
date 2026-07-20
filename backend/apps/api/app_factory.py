@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -29,10 +32,39 @@ _DEFAULT_CORS_ORIGINS: list[str] = [
 ]
 
 
+_logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # 启动期预热：在主线程、尚未接受并发请求时构建检索 facade，
+    # 触发 bge-m3 模型（torch/OpenMP）一次性加载，规避请求线程内初始化竞态 SIGSEGV。
+    # 仅在启用真实 dense 模型时预热（否则走 384 维哈希回退，无重模型加载）。
+    if os.environ.get("DENSE_USE_REAL_MODEL", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        try:
+            from finsight_agent.capabilities.retrieval.service import (
+                get_shared_retrieval_facade,
+            )
+
+            get_shared_retrieval_facade()
+            _logger.info("检索 facade 启动期预热完成（bge-m3 模型已加载）")
+        except Exception as exc:  # noqa: BLE001
+            # 捕获 Python 层异常（如模型文件缺失）以便记录；原生 SIGSEGV 无法被
+            # Python 捕获，会直接终止进程——此时配合 faulthandler 可定位到崩溃点。
+            _logger.warning("检索 facade 启动期预热失败：%s", exc)
+    yield
+
+
 def build_app(*, cors_origins: list[str] | None = None) -> FastAPI:
     app = FastAPI(
         title="FinSight Agent V1 Workbench Backend",
         version="v1",
+        lifespan=_lifespan,
     )
 
     origins = list(cors_origins) if cors_origins is not None else list(_DEFAULT_CORS_ORIGINS)
