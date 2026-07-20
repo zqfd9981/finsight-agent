@@ -7,10 +7,59 @@ classifier 只对 event_impact_analysis 做 strategy 三分类，本函数把两
 orchestrator 可直接执行的 stage 列表 + stage 级约束 + 最终响应模式。
 """
 
+import logging
+
 from shared.contracts.router_result import RouterResult
 from shared.enums.intent import Intent
 from shared.enums.response_mode import ResponseMode
 from shared.enums.stage_name import StageName
+
+_logger = logging.getLogger(__name__)
+
+
+def build_plan(
+    router_result: RouterResult,
+    *,
+    strategy_classifier: object | None = None,
+    query: str = "",
+    session_topic: str = "",
+) -> tuple[list[str], dict[str, dict[str, object]], str, dict[str, str] | None]:
+    """单一入口：intent(+event 策略分类) → (stages, stage_constraints, response_mode, strategy_payload)。
+
+    取代原先 classify_strategy_node + plan_stages_node 的二段路由：对 event_impact_analysis
+    意图内部调用 strategy_classifier 做策略三分类，其余意图 strategy_payload 为 None，
+    再统一查表 resolve_stages。对外只暴露本函数。
+    """
+    strategy_payload: dict[str, str] | None = None
+    if (
+        router_result.intent == Intent.EVENT_IMPACT_ANALYSIS.value
+        and strategy_classifier is not None
+    ):
+        try:
+            payload = strategy_classifier.classify(
+                query=query,
+                router_payload={
+                    "intent": router_result.intent,
+                    "follow_up_type": router_result.follow_up_type,
+                    "confidence": router_result.confidence,
+                    "entities": router_result.entities,
+                    "needs": router_result.needs,
+                    "constraints": router_result.constraints,
+                },
+                session_topic=session_topic,
+            )
+            strategy_payload = {
+                "strategy": str(payload.get("strategy") or "").strip(),
+                "confidence": str(payload.get("confidence") or "").strip(),
+                "reason": str(payload.get("reason") or "").strip(),
+            }
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("build_plan classify_strategy 失败，回退 None: %s", exc)
+            strategy_payload = None
+    stages, stage_constraints, response_mode = resolve_stages(
+        router_result, strategy_payload=strategy_payload
+    )
+    return stages, stage_constraints, response_mode, strategy_payload
 
 
 def resolve_stages(
@@ -42,7 +91,9 @@ def _build_metric_lookup_plan(
     time_hint = period_end or time_scope_raw or "latest"
     stages = [
         StageName.QUERY_STRUCTURED_DATA.value,
+        StageName.REFLECT_AND_REQUERY.value,
         StageName.SYNTHESIZE_ANSWER.value,
+        StageName.VERIFY_ANSWER.value,
     ]
     response_mode = ResponseMode.BRIEF_ANSWER.value
     stage_constraints = {
@@ -80,6 +131,7 @@ def _build_event_impact_plan(
             StageName.COLLECT_EVENT_CONTEXT.value,
             StageName.RETRIEVE_EVIDENCE.value,
             StageName.SYNTHESIZE_ANSWER.value,
+            StageName.VERIFY_ANSWER.value,
         ]
         response_mode = ResponseMode.REPORT.value
         stage_constraints = {
@@ -91,6 +143,7 @@ def _build_event_impact_plan(
                     "preferred_output", response_mode
                 ),
             },
+            StageName.VERIFY_ANSWER.value: {},
         }
         return stages, stage_constraints, response_mode
 
@@ -100,6 +153,7 @@ def _build_event_impact_plan(
             StageName.ANALYZE_TARGETS.value,
             StageName.RETRIEVE_EVIDENCE.value,
             StageName.SYNTHESIZE_ANSWER.value,
+            StageName.VERIFY_ANSWER.value,
         ]
         response_mode = ResponseMode.REPORT.value
         stage_constraints = {
@@ -114,6 +168,7 @@ def _build_event_impact_plan(
                     "preferred_output", response_mode
                 ),
             },
+            StageName.VERIFY_ANSWER.value: {},
         }
         return stages, stage_constraints, response_mode
 
@@ -121,6 +176,7 @@ def _build_event_impact_plan(
     stages = [
         StageName.COLLECT_EVENT_CONTEXT.value,
         StageName.SYNTHESIZE_ANSWER.value,
+        StageName.VERIFY_ANSWER.value,
     ]
     response_mode = ResponseMode.EVENT_ANSWER.value
     stage_constraints = {
@@ -129,6 +185,7 @@ def _build_event_impact_plan(
             "response_mode": response_mode,
             "preferred_output": ResponseMode.BRIEF_ANSWER.value,
         },
+        StageName.VERIFY_ANSWER.value: {},
     }
     return stages, stage_constraints, response_mode
 
@@ -139,6 +196,7 @@ def _build_evidence_lookup_plan(
     stages = [
         StageName.RETRIEVE_EVIDENCE.value,
         StageName.SYNTHESIZE_ANSWER.value,
+        StageName.VERIFY_ANSWER.value,
     ]
     response_mode = ResponseMode.REPORT.value
     stage_constraints = {
@@ -152,6 +210,7 @@ def _build_evidence_lookup_plan(
                 "preferred_output", response_mode
             ),
         },
+        StageName.VERIFY_ANSWER.value: {},
     }
     return stages, stage_constraints, response_mode
 
@@ -160,13 +219,14 @@ def _build_general_finance_qa_plan(
     router_result: RouterResult,
 ) -> tuple[list[str], dict[str, dict[str, object]], str]:
     """泛财经轻路径：LLM 直答，不调任何检索。"""
-    stages = [StageName.SYNTHESIZE_ANSWER.value]
+    stages = [StageName.SYNTHESIZE_ANSWER.value, StageName.VERIFY_ANSWER.value]
     response_mode = ResponseMode.DIRECT.value
     stage_constraints = {
         StageName.SYNTHESIZE_ANSWER.value: {
             "response_mode": response_mode,
             "preferred_output": response_mode,
         },
+        StageName.VERIFY_ANSWER.value: {},
     }
     return stages, stage_constraints, response_mode
 

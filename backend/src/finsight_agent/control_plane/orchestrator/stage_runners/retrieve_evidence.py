@@ -34,6 +34,8 @@ def run_retrieve_evidence_stage(
         execution_state=execution_state,
     )
     context_summary = _build_context_summary(execution_state)
+    # 从 router 实体提取目标公司，做确定性公司对齐（不依赖 LLM 回填）
+    target_company = _extract_target_company(router_result)
 
     # RetrievalAgent 内部 trace，用于调试和可观测性
     agent_rounds_trace: list[dict] = []
@@ -53,12 +55,15 @@ def run_retrieve_evidence_stage(
                 entities=dict(router_result.entities or {}),
                 context_summary=context_summary,
                 retrieval_limit=limit,
+                target_company_code=target_company["company_code"] or "",
+                target_company_name=target_company["company_name"] or "",
             )
             retrieval_result = agent_state.get("retrieval_result")
             if retrieval_result is None:
                 retrieval_result = retrieval_facade.retrieve_evidence(
                     raw_query=retrieval_query,
                     limit=limit,
+                    company_code=target_company["company_code"] or None,
                 )
             agent_rounds_trace = list(agent_state.get("rounds_trace", []))
             agent_rewritten_queries = list(agent_state.get("all_rewritten_queries", []))
@@ -75,11 +80,13 @@ def run_retrieve_evidence_stage(
             retrieval_result = retrieval_facade.retrieve_evidence(
                 raw_query=retrieval_query,
                 limit=limit,
+                company_code=target_company["company_code"] or None,
             )
     else:
         retrieval_result = retrieval_facade.retrieve_evidence(
             raw_query=retrieval_query,
             limit=limit,
+            company_code=target_company["company_code"] or None,
         )
 
     evidence_refs = [
@@ -107,6 +114,28 @@ def run_retrieve_evidence_stage(
         evidence_refs=evidence_refs,
         user_summary=summary,
     )
+
+
+def _extract_target_company(router_result: RouterResult) -> dict[str, str]:
+    """从 router 实体提取目标公司（确定性公司对齐用）。
+
+    新格式：entities.company = {raw, standard_name, stock_code}
+    旧格式：entities.company 可能是公司名字符串，或 entities.company_name
+    无公司实体（纯宏观/行业事件）返回空 dict，调用方据此不做过滤。
+    """
+    entities = router_result.entities or {}
+    company = entities.get("company")
+    code = ""
+    name = ""
+    if isinstance(company, dict):
+        code = str(company.get("stock_code") or "").strip()
+        name = str(company.get("standard_name") or company.get("raw") or "").strip()
+    elif isinstance(company, str):
+        name = company.strip()
+    elif not company:
+        # 旧格式兜底
+        name = str(entities.get("company_name") or "").strip()
+    return {"company_code": code, "company_name": name}
 
 
 def _build_retrieval_query(

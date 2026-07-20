@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from finsight_agent.capabilities.structured_data.unit_normalizer import format_display_value
 from shared.contracts.trace_block import TraceBlock
 from shared.enums.response_type import ResponseType
 from shared.contracts.stage_observation import StageObservation
@@ -86,11 +87,19 @@ def _summarize_key_outputs(observation: StageObservation) -> dict[str, object]:
         # 暴露结构化数据查询结果到 trace，便于前端展示命中/未命中状态
         structured_result = key_outputs.get("structured_result") or {}
         if isinstance(structured_result, dict):
+            raw_value = str(structured_result.get("value") or "")
+            raw_unit = str(structured_result.get("unit") or "")
+            metric_name = str(structured_result.get("metric") or structured_result.get("metric_name") or "")
+            # 展示层单位换算：千元/万元 → 亿元（与 synthesize summary 保持一致）；
+            # 每股类指标强制"元/股"不换算
+            display_value, display_unit = format_display_value(raw_value, raw_unit, metric_name=metric_name)
             return {
                 "company": str(structured_result.get("company") or structured_result.get("company_name") or ""),
-                "metric": str(structured_result.get("metric") or structured_result.get("metric_name") or ""),
-                "value": str(structured_result.get("value") or ""),
-                "unit": str(structured_result.get("unit") or ""),
+                "metric": metric_name,
+                "value": display_value,
+                "unit": display_unit,
+                "raw_value": raw_value,
+                "raw_unit": raw_unit,
                 "time_scope": str(structured_result.get("time_scope") or ""),
                 "is_degraded": bool(structured_result.get("is_degraded", True)),
                 "matched_by": str(structured_result.get("matched_by") or ""),

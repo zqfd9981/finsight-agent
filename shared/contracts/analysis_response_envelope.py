@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from shared.contracts.final_response import FinalResponse
 from shared.contracts.guardrail_or_error_response import GuardrailOrErrorResponse
@@ -23,5 +24,10 @@ class AnalysisResponseEnvelope:
     )
     # 这一轮分析附带的可展示 trace 区块列表。
     trace_blocks: list[TraceBlock] = field(default_factory=list)
+    # 统一证据注册表：evidence_id -> EvidenceDetail（来源标注用）。
+    # 汇聚 retrieve_evidence（年报/公告 RAG）、collect_event_context（事件新闻）、
+    # query_structured_data（年报结构化指标）三类证据的完整溯源，供前端
+    # 在「参考来源」面板与中间节点渲染来源标注。
+    evidence_index: dict[str, Any] = field(default_factory=dict)
     # 预留的可选备注字段，不作为前端渲染主逻辑的依赖。
     notes: str | None = None

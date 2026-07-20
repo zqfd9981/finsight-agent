@@ -42,6 +42,12 @@ _QUERY_SPLIT_MARKERS = (
     "对",
 )
 
+# Source labels that originate from an external EVENT search (vs. a
+# structured company-disclosure search). Event candidates are matched by the
+# reranker's relevance judgement only — they are NOT subject to the literal
+# query-anchor filter that company-disclosure candidates require.
+_EVENT_SOURCES = {"bocha"}
+
 
 class DualSourceExternalContextRetriever(ExternalContextRetriever):
     """Merge, filter, and rerank external event/disclosure candidates."""
@@ -252,7 +258,7 @@ class DualSourceExternalContextRetriever(ExternalContextRetriever):
                 query=query,
                 profile="external_news",
                 candidates=candidates,
-                top_n=limit,
+                top_n=max(limit, min(len(candidates), 8)),
             )
         score_map = {
             str(result["id"]) if isinstance(result, dict) else result.id: result
@@ -260,7 +266,7 @@ class DualSourceExternalContextRetriever(ExternalContextRetriever):
         }
 
         selected_items: list[ExternalContextItem] = []
-        anchors = _extract_query_anchors(query)
+        text_anchors = _extract_query_anchors(query)
         for index, item in enumerate(filtered_items):
             score_entry = score_map.get(str(index))
             if score_entry is None:
@@ -268,14 +274,53 @@ class DualSourceExternalContextRetriever(ExternalContextRetriever):
             keep = bool(score_entry["keep"]) if isinstance(score_entry, dict) else bool(score_entry.keep)
             if not keep:
                 continue
-            if anchors and not _contains_anchor(self._compose_candidate_text(item), anchors):
-                continue
+            # Company/disclosure candidates must literally mention a query
+            # anchor (e.g. the company name) to be considered on-topic.
+            # Event candidates (bocha) are judged by the reranker's relevance
+            # decision alone — requiring a literal query anchor would wrongly
+            # drop on-topic items that discuss the impact (freight, earnings)
+            # without repeating the event keyword (e.g. "红海").
+            if item.source not in _EVENT_SOURCES and text_anchors:
+                if not _contains_anchor(self._compose_candidate_text(item), text_anchors):
+                    continue
             selected_items.append(item)
             if len(selected_items) >= limit:
                 break
 
-        if not selected_items and rerank_results:
-            status["topic_mismatch"] = True
+        if not selected_items:
+            if rerank_results:
+                # The relevance gate dropped every candidate — either the LLM
+                # reranker applied a strict threshold, or its call failed and
+                # silently fell back to lexical scoring (which scores
+                # event-impact news, e.g. "隆基预亏", below the keyword-overlap
+                # threshold). The external source returned real candidates, so
+                # collapsing to an empty event context would yield a hollow
+                # answer. Recover with a best-effort selection of the
+                # top-scored candidates so event context is never silently
+                # emptied.
+                ranked = sorted(
+                    rerank_results,
+                    key=lambda r: (
+                        r.get("score") if isinstance(r, dict) else r.score
+                    ),
+                    reverse=True,
+                )
+                for result in ranked[:limit]:
+                    rid = str(result.get("id") if isinstance(result, dict) else result.id)
+                    try:
+                        idx = int(rid)
+                    except ValueError:
+                        continue
+                    if 0 <= idx < len(filtered_items):
+                        selected_items.append(filtered_items[idx])
+                    if len(selected_items) >= limit:
+                        break
+                status["topic_mismatch"] = not selected_items
+                if selected_items:
+                    status["rerank_recovered"] = True
+            else:
+                status["topic_mismatch"] = True
+
         status["selected_candidate_count"] = len(selected_items)
         return selected_items, status
 

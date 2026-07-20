@@ -3,6 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+
+# 与 bge_m3.py 同源的守卫：避免 torch/transformers 与本机 sklearn/faiss 的
+# OpenMP 运行时（Intel libiomp5md vs MSVC vcomp140）冲突导致间歇性段错误。
+# 必须在 import torch 之前设置；作为 LLM 不可用时 fallback 路径也可能触发。
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 from pathlib import Path
 from typing import Any, Mapping
 

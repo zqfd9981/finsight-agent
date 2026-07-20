@@ -8,4 +8,6 @@ class StageName(str, Enum):
     ANALYZE_TARGETS = "analyze_targets"
     RETRIEVE_EVIDENCE = "retrieve_evidence"
     QUERY_STRUCTURED_DATA = "query_structured_data"
+    REFLECT_AND_REQUERY = "reflect_and_requery"
     SYNTHESIZE_ANSWER = "synthesize_answer"
+    VERIFY_ANSWER = "verify_answer"
