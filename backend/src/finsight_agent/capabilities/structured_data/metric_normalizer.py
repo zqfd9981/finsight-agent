@@ -139,25 +139,16 @@ _KNOWN_ALIASES: dict[str, str] = {
     "归母净资产": "net_assets_attributable_to_parent_company_shareholders",
     "营收": "revenue",
     "扣除非经常性损益后的净利润": "deducted_net_profit",
-    "基本每股收益": "basic_eps",
-    "稀释每股收益": "diluted_eps",
+    "基本每股收益": "basic_earnings_per_share",
+    "稀释每股收益": "diluted_earnings_per_share",
+    "每股收益": "basic_earnings_per_share",
+    "每股盈利": "basic_earnings_per_share",
     "经营活动产生的现金流量净额": "net_operating_cash_flow",
     "投资活动产生的现金流量净额": "net_investing_cash_flow",
     "筹资活动产生的现金流量净额": "net_financing_cash_flow",
     "现金及现金等价物净增加额": "net_increase_in_cash",
     "期末现金及现金等价物余额": "cash_and_equivalents_at_period_end",
 }
-
-
-_SYSTEM_PROMPT = """你是会计科目标准化专家。给定一批中文财务指标名，把它们映射到标准英文 key。
-
-命名规范：
-- snake_case 英文
-- 参考通用会计科目命名（如 revenue/net_profit/total_assets）
-- 保持简洁准确
-- 同义指标合并到同一 key（如"归属于上市公司股东的净利润"和"归属于母公司股东的净利润"都映射到 net_profit_attributable_to_parent）
-
-只输出 JSON 对象，key 是原始中文指标名，value 是标准英文 key。"""
 
 
 class MetricNormalizer:
@@ -203,6 +194,22 @@ class MetricNormalizer:
             return self._aliases[cleaned]
         # 第 3 层：返回清洗后的 label（比原文更干净，便于后续 LLM aliases 映射）
         return cleaned
+
+    def to_label(self, standard_key: str) -> str:
+        """反向映射：英文 standard_key → 中文 label（用于面向用户的展示）。
+
+        未命中时返回原文（避免空值，调用方应自行判断是否需要 fallback）。
+
+        示例：
+            to_label("net_profit_attributable_to_parent") → "归母净利润"
+            to_label("unknown_key") → "unknown_key"
+        """
+        s = standard_key.strip()
+        # 反向查找：value → key
+        for label, key in self._aliases.items():
+            if key == s:
+                return label
+        return s
 
     def build_aliases_from_records(
         self, records: list[MetricRecord]
@@ -269,10 +276,13 @@ class MetricNormalizer:
 
     def _call_llm_for_batch(self, names: list[str]) -> dict[str, str]:
         """调 LLM 把一批中文指标名映射到标准英文 key。"""
+        from finsight_agent.infra.llm.prompt_registry import get_prompt
+        # 从集中 prompts/ 目录加载 prompt 文本
+        system_prompt = get_prompt("structured_data.metric_normalizer").text
         result = self._llm_client.complete_json(
             prompt_name="metric_normalizer",
             variables={
-                "system_prompt": _SYSTEM_PROMPT,
+                "system_prompt": system_prompt,
                 "metric_names": names,
             },
         )

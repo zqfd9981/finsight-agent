@@ -7,6 +7,8 @@ from pathlib import Path
 import sqlite3
 
 from .models import MetricQuery, MetricRecord
+from .sql_executor import execute_sql
+from .unit_normalizer import normalize_to_base_unit
 
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -96,6 +98,13 @@ class MetricRepository:
                     "ALTER TABLE metric_records ADD COLUMN source_section "
                     "TEXT NOT NULL DEFAULT 'unknown'"
                 )
+            # Phase A 单位基建：value_numeric REAL 列，存归一到元后的数值。
+            # 旧数据为 NULL，查询时走 COALESCE(value_numeric, CAST(value AS REAL)) 兼容。
+            # 新数据写入时由 _insert_batch 强制计算填入。
+            if "value_numeric" not in cols:
+                conn.execute(
+                    "ALTER TABLE metric_records ADD COLUMN value_numeric REAL"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_metric_lookup "
                 "ON metric_records(company_name, metric_name, time_scope)"
@@ -152,20 +161,26 @@ class MetricRepository:
     ) -> None:
         """批量插入记录。
 
-        asdict(r) 按 MetricRecord 字段声明顺序返回，与下面的列顺序一致
-        （statement_type、source_section 是最后两个字段，默认 'unknown'）。
+        asdict(r) 按 MetricRecord 字段声明顺序返回 16 个业务字段，
+        追加 value_numeric（按 unit/currency 归一到元）作为第 17 列。
+        无法归一（% / 非 CNY / 非数值）时 value_numeric 为 NULL，
+        查询时走 COALESCE(value_numeric, CAST(value AS REAL)) 兼容。
         """
         if not records:
             return
-        rows = [tuple(asdict(r).values()) for r in records]
+        rows = []
+        for r in records:
+            vnum = normalize_to_base_unit(r.value, r.unit, r.currency)
+            rows.append(tuple(asdict(r).values()) + (vnum,))
         conn.executemany(
             """
             INSERT INTO metric_records (
                 company_name, company_code, metric_name, metric_label,
                 time_scope, period_end, value, unit, currency,
                 source_type, source_document_id, source_table_id,
-                source_caption, confidence, statement_type, source_section
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_caption, confidence, statement_type, source_section,
+                value_numeric
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -220,6 +235,13 @@ class MetricRepository:
             "FROM metric_records"
         )
         stmt_order = self._STMT_PRIORITY
+        # 防御性短路：company 与 metric 均抽取失败（实体为空字符串）时直接未命中，
+        # 避免 legacy fallback 的 `company_name LIKE '%%'` 误匹配全表 +
+        # 空 metric_name 命中脏数据行（如其它公司的附注行）返回乱七八糟的结果。
+        if not (query.company_name or "").strip() and not (
+            query.metric_name or ""
+        ).strip():
+            return None
         # source_section 过滤：默认只查三表，include_notes=True 加上注释
         if include_notes:
             section_filter = (
@@ -416,6 +438,18 @@ class MetricRepository:
             f"ORDER BY {stmt_order} LIMIT 1",
             (f"%{query.company_name}%", query.metric_name, f"{query.time_scope}%"),
         ).fetchone()
+
+    def execute_parameterized_sql(
+        self, sql: str, params: tuple[object, ...]
+    ) -> list[MetricRecord]:
+        """执行 Assembler / T2S 产出的参数化 SQL，返回多行 MetricRecord。
+
+        安全校验由 sql_executor.execute_sql 负责（SELECT-only + 表白名单 +
+        禁多语句/注释/UNION/INTO + LIMIT 上限 100）。
+        params 由调用方（Assembler）传入，绝不字符串拼接用户输入。
+        """
+        with closing(sqlite3.connect(self._sqlite_path)) as conn:
+            return execute_sql(conn, sql, params)
 
     @staticmethod
     def _row_to_record(row: tuple) -> MetricRecord:
