@@ -21,6 +21,11 @@ class RouterResult:
     confidence: str = "low"
     # 从用户问题中抽取出的核心语义实体。
     entities: dict[str, Any] = field(default_factory=dict)
+    # SQL 约束字段（仅 metric_lookup 可能非空）：阈值筛选与 TopN 排序。
+    # 经 constraint_resolver 校验后喂给 SQL 组装器；LLM 只产结构化字段，绝不拼 SQL。
+    # 相对值比较（"比 xx 公司高"）无法用本结构表达，应由 Router 省略、下游自然语言兜底。
+    filters: list[dict] = field(default_factory=list)
+    ranking: dict | None = None
     # 后续规划和执行阶段需要调用的能力标签列表。
     needs: list[str] = field(default_factory=list)
     # 本轮执行的约束条件，例如时间范围或输出偏好。

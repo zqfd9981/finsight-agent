@@ -18,8 +18,14 @@
 - entities
 - needs
 - constraints
+- filters（可选，列表，默认空 `[]`；仅 metric_lookup 可能非空）
+- ranking（可选，对象或 `null`，默认 `null`；仅 metric_lookup 可能非空）
 
- 禁止新增字段，禁止省略字段，禁止发明新的枚举值。
+ 除上述 `filters` / `ranking` 两个可选约束字段外，禁止新增其他字段，
+ 禁止省略上述必填字段，禁止发明新的枚举值。
+ 例外：当 `intent = event_impact_analysis` 时，entities 可且应当包含
+ `event` 与 `themes` 字段（见第四节 4.2）——这是事件检索所需的合法扩展，
+ 不属于"发明新字段"，不得省略。
 
 ---
 
@@ -57,11 +63,15 @@
 ### 4. metric_lookup（语义条件判定，非关键词匹配）
 **必须同时满足以下三点语义条件**：
 1. query 明确指向某家具体上市公司（无论公司名如何表述，
-   只要能识别出是哪家 A 股上市公司即可，包括简称、全称、股票代码）
+   只要能识别出是哪家 A 股上市公司即可，包括简称、全称、股票代码）；
+   **或** query 是全公司排名/筛选类查询（如"2024年净利润最高的公司"
+   "营收前3名""净利润超过100亿的公司"），此时 company 可为空数组，
+   走 ranking/filters 全公司排序路径
 2. query 明确询问某个可量化的财务指标（包括但不限于：
    资产负债表科目、利润表科目、现金流量表科目、
    基于这些科目的衍生比率如毛利率/净利率/ROE/资产负债率）
-3. query 包含查询具体数值的意图（多少、是多少、多大、几何）
+3. query 包含查询具体数值的意图（多少、是多少、多大、几何、
+   最高、最低、最大、最小、前N名、排名、总和、平均）
 
 **不要因为公司名或指标名不在某个列表中就拒绝判为 metric_lookup** —
 用语义理解判断，不是关键词匹配。
@@ -74,6 +84,10 @@
 「贵州茅台 2024 年毛利率是多少」（衍生指标，也是 metric_lookup）
 「海尔智家 2024 年 ROE 是多少」（衍生指标，也是 metric_lookup）
 「宁德时代 2024 年归母净利润是多少」（口语简称"归母净利润"，语义理解为 metric_lookup）
+「2024 年净利润最高的公司是谁」（全公司排名，company 为空数组，ranking.limit=1）
+「2024 年净利润前 3 名」（全公司排名，ranking.limit=3）
+「2024 年营收最低的公司」（全公司排名，ranking.limit=1, desc=false）
+「2024 年所有公司净利润总和是多少」（全公司聚合，company 为空数组）
 
 ❌ 不满足任一条件 → 不能设为 metric_lookup
 
@@ -107,9 +121,57 @@
 
 ---
 
+## 三点五、会话上下文与指代消解（结合 session_context，核心能力）
+
+当 query 出现指代词（"它""这家公司""这个指标""那段时间"）或省略主语时，
+**必须从 session_context 消解**，不得留空 entities：
+
+### 1. 公司指代消解（"它""这家公司""该企业""这个公司"）
+- 优先用 `session_context.active_candidates[0]`
+- 消解后 `entities.company.raw` = 消解结果（公司名），`standard_name`/`stock_code` 一并回填
+- 示例：上一轮问"格力电器货币资金"，本轮"它的净利润呢" → company 回填为"格力电器"
+
+### 2. 指标指代消解（"这个指标""该数据""这个数"）
+- 优先用 `session_context.active_metrics[0]`（metric standard_name）
+- 消解后 `entities.metric.standard_name` = 消解结果，`raw` 保留用户原文
+
+### 3. 时间指代消解（"那段时间""同期""那个时候"）
+- 优先用 `session_context.active_time_scope`（period_end/fiscal_year）
+- 消解后 `entities.time_scope.period_end` / `fiscal_year` 一并回填
+
+### 4. 话题切换检测
+- 若 query 出现**新的**公司名/指标名（与 active_candidates/active_metrics 不同），判定为话题切换
+- 设 `follow_up_type=redirect`，**不复用** session_context 的 active_* 字段
+- 示例：上一轮"茅台毛利率"，本轮"宁德时代资产负债率" → redirect，company 回填为"宁德时代"
+
+### 5. 消解判定规则（强制）
+- 指代词出现 + `session_context` 非空 → **必须消解**，不得留空 entities
+- 消解后仍需满足对应 intent 的判定条件（如 metric_lookup 需同时有公司+指标+数值询问意图）
+- `session_context.recent_turns` 提供最近 3 轮原文，可辅助判断指代对象
+
+### 6. 消解示例
+```
+session_context:
+  active_candidates: ["格力电器"]
+  active_metrics: ["cash_and_equivalents"]
+  active_time_scope: {"period_end": "2024-12-31", "fiscal_year": 2024}
+  recent_turns: [{"query": "格力电器货币资金", "intent": "metric_lookup"}]
+
+query: "它的净利润呢"
+→ 消解: company="格力电器", metric="净利润"(net_profit), time_scope=2024-12-31
+→ intent=metric_lookup, follow_up_type=none
+```
+
+
+---
+
 ## 四、entities 结构（语义理解核心）
 
-**对 metric_lookup intent，entities 必须输出以下嵌套结构**（其他 intent 可保持简单结构）：
+不同 intent 的 entities 结构要求不同：
+
+### 4.1 metric_lookup（必须输出完整嵌套结构）
+
+**对 metric_lookup intent，entities 必须输出以下嵌套结构**：
 
 ```json
 {
@@ -131,10 +193,32 @@
 }
 ```
 
+### 4.2 event_impact_analysis（必须输出事件实体）
+
+当 `intent = event_impact_analysis` 时，entities **必须**包含以下字段（这是事件检索的必需输入，非"新增字段"，不得留空）：
+
+- `company`：受影响的**目标上市公司**（如有，填嵌套 `{raw, standard_name, stock_code}`；纯宏观 / 行业事件无具体公司可省略或留空）
+- `event`：触发事件 / 宏观主题的简短命名（string），如 `"红海局势"`、`"美联储降息"`、`"半导体出口管制"`
+- `themes`：用于事件检索的扩展词数组（list[str]，2-5 个），从 query 与 event 中提炼，如 `["红海", "航运", "光伏", "地缘"]`
+
+```json
+{
+  "company": {"raw": "隆基绿能", "standard_name": "隆基绿能", "stock_code": "601012"},
+  "event": "红海局势",
+  "themes": ["红海", "航运", "光伏", "地缘"],
+  "time_scope": {"raw": "", "period_end": "", "fiscal_year": null}
+}
+```
+
+注意：`event` / `themes` 留空会导致下游事件检索（Bocha）拿不到检索词、
+事件证据缺失、回答空洞。**务必基于 query 语义填写**，不要留 `""` / `[]`。
+
 ### company 解析规则
 - `raw`：用户原文中的公司名表述
 - `standard_name`：你理解的 DB 中的标准公司名（如"格力电器"、"宁德时代"）
 - `stock_code`：6 位 A 股代码（如"000651"、"300750"）；若不确定，输出空字符串 ""
+- **多公司查询**（如"茅台、五粮液、洋河哪家营收最高"）：`company` 可为对象**数组**，
+  每项都是完整的 `{raw, standard_name, stock_code}`；系统按列表型处理并正确拼 `IN (?,?,?)`。
 
 ### metric 解析规则
 - `raw`：用户原文中的指标表述（如"归母净利润"、"营收"、"去年三季度净利"）
@@ -219,6 +303,31 @@
 
 ---
 
+## 四点五、约束字段 filters / ranking（metric_lookup 专用）
+
+仅当 `intent=metric_lookup` 且 query 含筛选/排序意图时才输出 `filters` / `ranking`；
+其他 intent 一律 `filters=[]`、`ranking=null`。
+
+### 示例
+1. "宁德时代 2024 年净利润超过 1000 亿"
+   → `filters: [{"op": ">", "value": 1000, "unit": "亿元"}]`
+2. "茅台、五粮液、洋河 2024 年营收哪家最高"
+   → `entities.company` 为三家公司数组；`ranking: {"limit": 1, "desc": true}`
+3. "2024 年营收排前 3 的公司"
+   → `ranking: {"limit": 3, "desc": true}`
+4. "比亚迪 2024 年净利润是多少"（无筛选无排序）
+   → `filters: []`，`ranking: null`
+
+### ⚠️ 边界（重要，必须遵守）
+- **相对值比较不支持**："比 xx 公司高""比茅台多"这类以**另一家公司的值为基准**的比较，
+  本结构无法表达（`filters.value` 只能是字面数字，不能是公司名/引用）。
+  → 这种情况 **不要** 发明 filters，直接输出 `filters=[]`、`ranking=null`，
+    系统会返回候选公司集合，由自然语言层做比较。切勿用公司名当 `value`。
+- `filters` / `ranking` 只在 `metric_lookup` 下有意义；衍生指标（毛利率等）的"最高"
+  当前不参与排序，正常输出 entities 即可。
+
+---
+
 ## 五、RouterResult 字段说明
 
 ### intent（仅允许）
@@ -253,12 +362,28 @@
 - preferred_output: brief_answer | report | direct | guardrail
 - time_hint: recent | latest | 2023_annual | unspecified
 
+### filters（可选，仅 metric_lookup）
+阈值筛选列表，每条形如 `{"op": ">", "value": 1000, "unit": "亿元", "metric": "net_profit"}`：
+- `op`：比较运算符，仅允许 `>` `<` `>=` `<=` `=` `!=`
+- `value`：字面数字（如 1000），比较基准，单位由 `unit` 给出
+- `unit`：阈值单位，如 `"亿元"` / `"万元"` / `"元"`；系统归一到元再比
+- `metric`：可选，限定筛选哪类指标（通常与主查询指标一致）
+- 无阈值筛选时输出空列表 `[]`
+
+### ranking（可选，仅 metric_lookup）
+TopN 排序，形如 `{"limit": 1, "desc": true, "by_metric": "net_profit"}`：
+- `limit`：返回前 N 条（整数 ≥ 1）；"最高"→1，"排前 3"→3
+- `desc`：`true` 降序（从大到小，找最大），`false` 升序（找最小）
+- `by_metric`：可选，按哪个指标排（通常与主查询指标一致）
+- 无排序需求时输出 `null`
+
 ---
 
 ## 六、硬性输出约束（不可违反）
 
 -  只输出 JSON
--  不新增字段
+-  不新增 `filters` / `ranking` 之外的字段（`filters`/`ranking` 为可选约束字段，见上文）；
+   `event_impact_analysis` 的 `event` / `themes` 例外，见第四节 4.2
 -  不省略字段
 -  不输出解释、推理过程
 -  不确定时优先输出 general_finance_qa（而非 out_of_scope）

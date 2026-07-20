@@ -15,10 +15,15 @@ class RouterService:
     """V1 router 的最小服务骨架。"""
 
     def __init__(self, llm_client: LlmClient | None = None) -> None:
-        settings = load_settings()
-        self._router_system_prompt = settings.control_plane.prompts.router_system_prompt_path.read_text(
-            encoding="utf-8"
-        )
+        # 优先用 PromptRegistry 集中加载，回退到旧路径配置（向后兼容）
+        try:
+            from finsight_agent.infra.llm.prompt_registry import get_prompt
+            self._router_system_prompt = get_prompt("router.system").text
+        except Exception:
+            settings = load_settings()
+            self._router_system_prompt = settings.control_plane.prompts.router_system_prompt_path.read_text(
+                encoding="utf-8"
+            )
         self._llm_client = llm_client or LlmClient()
 
     def route(

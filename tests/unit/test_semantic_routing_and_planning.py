@@ -22,9 +22,58 @@ from shared.enums.response_mode import ResponseMode
 from shared.enums.stage_name import StageName
 
 
+class FakeRouterLlm:
+    """确定性 router LLM 桩：按 query 返回固化 payload，避免测试依赖实时 LLM。
+
+    仅覆盖本文件三个分类测试用到的 query；其余返回通用 metric_lookup payload。
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def complete_json(self, prompt_name: str, variables: dict[str, object]) -> dict[str, object]:
+        self.calls.append({"prompt_name": prompt_name, "variables": variables})
+        query = str(variables.get("query", ""))
+        return _ROUTER_FIXTURE_PAYLOADS.get(query, _METRIC_LOOKUP_PAYLOAD)
+
+
+_METRIC_LOOKUP_PAYLOAD = {
+    "intent": "metric_lookup",
+    "follow_up_type": "none",
+    "confidence": "high",
+    "entities": {
+        "company": {"raw": "宁德时代", "standard_name": "宁德时代", "stock_code": "300750"},
+        "metric": {"raw": "净利润", "standard_name": "net_profit", "metric_type": "direct"},
+        "time_scope": {"raw": "2024年", "period_end": "2024-12-31", "fiscal_year": 2024},
+    },
+    "needs": ["structured_data_query"],
+    "constraints": {"preferred_output": "brief_answer"},
+}
+
+_ROUTER_FIXTURE_PAYLOADS = {
+    "宁德时代 2024 年净利润是多少？": _METRIC_LOOKUP_PAYLOAD,
+    "红海局势升级利好哪些A股航运股？": {
+        "intent": "event_impact_analysis",
+        "follow_up_type": "none",
+        "confidence": "high",
+        "entities": {"event": "红海局势升级", "themes": ["航运"], "time_scope": "recent"},
+        "needs": ["news_search", "concept_mapping", "rag_retrieval"],
+        "constraints": {"time_hint": "recent", "preferred_output": "report"},
+    },
+    "把中远海能受益逻辑的证据展开一下": {
+        "intent": "evidence_lookup",
+        "follow_up_type": "drilldown",
+        "confidence": "high",
+        "entities": {"target": "中远海能", "claim": "把中远海能受益逻辑的证据展开一下"},
+        "needs": ["rag_retrieval"],
+        "constraints": {"preferred_output": "report", "retrieval_budget": 4},
+    },
+}
+
+
 class SemanticRoutingAndPlanningTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.router = RouterService()
+        self.router = RouterService(llm_client=FakeRouterLlm())
 
     def test_router_classifies_metric_lookup_with_entities(self) -> None:
         result = self.router.route(
@@ -105,7 +154,9 @@ class StagePlannerTest(unittest.TestCase):
             stages,
             [
                 StageName.QUERY_STRUCTURED_DATA.value,
+                StageName.REFLECT_AND_REQUERY.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
         self.assertEqual(response_mode, ResponseMode.BRIEF_ANSWER.value)
@@ -126,7 +177,10 @@ class StagePlannerTest(unittest.TestCase):
 
         stages, stage_constraints, response_mode = resolve_stages(router_result)
 
-        self.assertEqual(stages, [StageName.SYNTHESIZE_ANSWER.value])
+        self.assertEqual(
+            stages,
+            [StageName.SYNTHESIZE_ANSWER.value, StageName.VERIFY_ANSWER.value],
+        )
         self.assertEqual(response_mode, ResponseMode.DIRECT.value)
         self.assertEqual(
             stage_constraints[StageName.SYNTHESIZE_ANSWER.value]["response_mode"],
@@ -148,6 +202,7 @@ class StagePlannerTest(unittest.TestCase):
             [
                 StageName.COLLECT_EVENT_CONTEXT.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
         self.assertEqual(response_mode, ResponseMode.EVENT_ANSWER.value)
@@ -176,6 +231,7 @@ class StagePlannerTest(unittest.TestCase):
                 StageName.COLLECT_EVENT_CONTEXT.value,
                 StageName.RETRIEVE_EVIDENCE.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
         self.assertEqual(response_mode, ResponseMode.REPORT.value)
@@ -205,6 +261,7 @@ class StagePlannerTest(unittest.TestCase):
                 StageName.ANALYZE_TARGETS.value,
                 StageName.RETRIEVE_EVIDENCE.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
         self.assertEqual(response_mode, ResponseMode.REPORT.value)
@@ -234,6 +291,7 @@ class StagePlannerTest(unittest.TestCase):
             [
                 StageName.RETRIEVE_EVIDENCE.value,
                 StageName.SYNTHESIZE_ANSWER.value,
+                StageName.VERIFY_ANSWER.value,
             ],
         )
         self.assertEqual(response_mode, ResponseMode.REPORT.value)

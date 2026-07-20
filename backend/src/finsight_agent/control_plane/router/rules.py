@@ -16,17 +16,21 @@ _FALLBACK_COMPANIES = [
     "TCL中环", "平安银行", "中兴通讯", "美的集团", "泸州老窖",
 ]
 _YEAR_PATTERN = re.compile(r"(20\d{2})\s*年")
-# 路由层只识别关键词，返回中文原文，由 StructuredDataService 用 normalizer 映射到标准 key
-_METRIC_KEYWORDS = {
-    "净利润": "净利润",
-    "营收": "营业收入",
-    "营业收入": "营业收入",
-    "收入": "营业收入",
-    "总资产": "资产总计",
-    "资产总计": "资产总计",
-    "负债": "负债合计",
-    "现金流": "经营活动产生的现金流量净额",
-    "每股收益": "基本每股收益",
+# 路由层只识别关键词，返回 (中文 raw, 英文 standard_name) 元组。
+# standard_name 直接给英文 key（与 LLM router 同契约），让 entities_validator
+# 能通过校验走 assembler 主路径；raw 保留中文原文供 synthesize 展示。
+# 之前用中文 standard_name 会导致 entities_validator 剔除该实体 → 回退 _fallback_single，
+# 丢失多行查询能力且与 LLM 路径行为不一致。
+_METRIC_KEYWORDS: dict[str, tuple[str, str]] = {
+    "净利润": ("净利润", "net_profit"),
+    "营收": ("营业收入", "revenue"),
+    "营业收入": ("营业收入", "revenue"),
+    "收入": ("营业收入", "revenue"),
+    "总资产": ("资产总计", "total_assets"),
+    "资产总计": ("资产总计", "total_assets"),
+    "负债": ("负债合计", "total_liabilities"),
+    "现金流": ("经营活动产生的现金流量净额", "net_operating_cash_flow"),
+    "每股收益": ("基本每股收益", "basic_earnings_per_share"),
 }
 
 
@@ -105,9 +109,12 @@ def route_with_rules(
             intent=Intent.METRIC_LOOKUP.value,
             follow_up_type=follow_up_type,
             confidence="high",
+            # 输出新格式嵌套 dict（与 LLM router 同一契约），否则下游
+            # entities_validator / _fallback_single 只会读 dict 实体，
+            # 收到字符串实体会抽取为空 → find_best_match 误匹配全表脏数据。
             entities={
-                "company": _extract_company(normalized_query),
-                "metric": _extract_metric(normalized_query),
+                "company": _make_company_entity(_extract_company(normalized_query)),
+                "metric": _make_metric_entity(_extract_metric(normalized_query)),
                 "time_scope": _extract_metric_time_scope(normalized_query),
             },
             needs=["structured_data_query"],
@@ -242,27 +249,54 @@ def _extract_company(query: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _extract_metric(query: str) -> str | None:
-    for keyword, metric in _METRIC_KEYWORDS.items():
+def _extract_metric(query: str) -> tuple[str, str] | None:
+    """返回 (raw_zh, standard_name_en) 元组，未匹配返回 None。"""
+    for keyword, metric_tuple in _METRIC_KEYWORDS.items():
         if keyword in query:
-            return metric
+            return metric_tuple
     return None
 
 
-def _extract_metric_time_scope(query: str) -> str:
-    """从查询中提取时间范围。
+def _make_company_entity(name: str | None) -> dict | None:
+    """把规则版抽出的公司名包装成新格式嵌套 dict（与 LLM router 同契约）。
 
-    转换规则：
-    - "2024年" → "2024年"（保留中文年份，用于匹配 DB time_scope 字段）
-      DB 的 time_scope 存的是表格列头（如"2024年"、"2023年"、"2024年12月31日"），
-      period_end 则全是报告截止日（2025年报的 period_end 都是 2024-12-31），
-      无法区分本年/上年。用 time_scope LIKE 匹配更准确。
-    - 无年份 → "latest"
+    stock_code 规则版无法从正则获得，留空（下游 fallback 走 company_name LIKE）。
+    """
+    if not name:
+        return None
+    return {"raw": name, "standard_name": name, "stock_code": ""}
+
+
+def _make_metric_entity(metric: tuple[str, str] | None) -> dict | None:
+    """把规则版抽出的指标包装成新格式嵌套 dict（与 LLM router 同契约）。
+
+    metric 是 (raw_zh, standard_name_en) 元组：
+    - raw: 中文原文（如"净利润"），供 synthesize 展示
+    - standard_name: 英文 key（如"net_profit"），让 entities_validator 通过校验走 assembler 主路径
+    """
+    if not metric:
+        return None
+    raw_zh, standard_name_en = metric
+    return {"raw": raw_zh, "standard_name": standard_name_en, "metric_type": "direct"}
+
+
+def _extract_metric_time_scope(query: str) -> dict:
+    """从查询中提取时间范围，返回新格式嵌套 dict（含 period_end 日期）。
+
+    - "2024年" → {"raw": "2024年", "period_end": "2024-12-31", "fiscal_year": 2024}
+      period_end 直接给到年报截止日，下游 assemble / find_best_match 可精确匹配
+      DB 的 period_end 字段（如 2024 年报 period_end='2024-12-31'）。
+    - 无年份 → {"raw": "latest", "period_end": "", "fiscal_year": None}
     """
     year_match = _YEAR_PATTERN.search(query)
     if year_match:
-        return year_match.group(1) + "年"
-    return "latest"
+        year = year_match.group(1)
+        return {
+            "raw": f"{year}年",
+            "period_end": f"{year}-12-31",
+            "fiscal_year": int(year),
+        }
+    return {"raw": "latest", "period_end": "", "fiscal_year": None}
 
 
 def _extract_event(query: str) -> str:
