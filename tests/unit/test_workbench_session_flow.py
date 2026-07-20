@@ -47,9 +47,9 @@ class RecordingRouterService:
             follow_up_type="none",
             confidence="high",
             entities={
-                "company": "CATL",
-                "metric": "net_profit",
-                "time_scope": "2024_annual",
+                "company_name": "CATL",
+                "metric_raw": "net_profit",
+                "time_scope_raw": "2024_annual",
             },
             needs=["structured_data_query"],
             constraints={"preferred_output": "brief_answer"},
@@ -147,6 +147,69 @@ class StubOrchestratorService:
             ),
         )
 
+    def execute_graph(
+        self,
+        *,
+        request: AnalysisRequest,
+        session_context: SessionContext | None = None,
+        event_callback=None,
+        router_service=None,
+        session_service=None,
+        strategy_classifier=None,
+    ):
+        from finsight_agent.control_plane.orchestrator.models import (
+            OrchestrationResult,
+        )
+
+        del session_context, strategy_classifier
+        # 模拟 graph 路径：execute_graph 内部先发射 run_started
+        if event_callback is not None:
+            event_callback(
+                AnalysisStreamEvent(
+                    event_type="run_started",
+                    run_id="run_stub",
+                    message="run started",
+                )
+            )
+        # 模拟 graph 路径：load_session → route → execute → save_snapshot
+        loaded_context = None
+        if session_service is not None and request.session_id:
+            loaded_context = session_service.load_context(request.session_id)
+        if router_service is not None:
+            router_result = router_service.route(
+                query=request.query, session_context=loaded_context
+            )
+        else:
+            router_result = RouterResult(
+                intent="metric_lookup",
+                follow_up_type="none",
+                confidence="high",
+                entities={},
+                needs=[],
+                constraints={},
+            )
+        stages = ["query_structured_data", "synthesize_answer"]
+        result = self.execute(
+            request=request,
+            router_result=router_result,
+            stages=stages,
+            stage_constraints={},
+            response_mode="brief_answer",
+            session_context=loaded_context,
+            event_callback=event_callback,
+        )
+        # 模拟 graph 的 save_snapshot 节点
+        if session_service is not None and router_result.intent != "out_of_scope":
+            snapshot = session_service.build_snapshot(
+                request=request,
+                router_result=router_result,
+                stages=stages,
+                orchestration_result=result,
+            )
+            if snapshot is not None:
+                session_service.save_snapshot(snapshot)
+        return result
+
 
 class SessionServiceTest(unittest.TestCase):
     def test_load_context_returns_none_for_missing_session(self) -> None:
@@ -166,9 +229,9 @@ class SessionServiceTest(unittest.TestCase):
                 follow_up_type="none",
                 confidence="high",
                 entities={
-                    "company": "CATL",
-                    "metric": "net_profit",
-                    "time_scope": "2024_annual",
+                    "company_name": "CATL",
+                    "metric_raw": "net_profit",
+                    "time_scope_raw": "2024_annual",
                 },
                 needs=["structured_data_query"],
                 constraints={"preferred_output": "brief_answer"},
@@ -282,7 +345,7 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
         self.assertIsNotNone(loaded)
         assert loaded is not None
         self.assertIn("CATL", loaded.context.history_summary)
-        self.assertIn("COSCO", loaded.context.history_summary)
+        self.assertIn("COSCO", loaded.context.active_topic)
 
     def test_workbench_degrades_when_session_snapshot_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -323,13 +386,12 @@ class WorkbenchSessionFlowTest(unittest.TestCase):
             )
 
         self.assertEqual(events[0].event_type, "run_started")
-        self.assertEqual(events[1].stage_name, "routing")
-        self.assertEqual(events[2].stage_name, "routing")
-        self.assertEqual(events[3].stage_name, "stage_planning")
-        self.assertEqual(events[4].stage_name, "stage_planning")
         self.assertEqual(events[-1].event_type, "run_finished")
         self.assertEqual(events[-1].final_response["response_type"], "success")
         self.assertIn("response_envelope", events[-1].payload)
+        # graph 路径下应至少发射一条 stage 事件（具体 stage 名随路径变化，不耦合）
+        stage_events = [e for e in events if e.event_type.startswith("stage_")]
+        self.assertGreater(len(stage_events), 0)
 
 
 if __name__ == "__main__":
