@@ -43,6 +43,7 @@ def assemble_evidence_item(
         company_name=hit.company_name,
         doc_type=hit.doc_type,
         section_path=list(hit.section_path),
+        report_year=str(hit.report_year or ""),
     )
     return evidence, used_fallback
 

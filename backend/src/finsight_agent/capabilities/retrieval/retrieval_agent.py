@@ -29,7 +29,11 @@ from finsight_agent.infra.llm.client import LlmClient
 _logger = logging.getLogger(__name__)
 
 _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
-_DEFAULT_MAX_ROUNDS = 3  # 完整回溯循环（配合并行检索优化性能）
+# 在线 serving：2 轮反思足够。3 轮最坏 6 次串行 LLM（rewrite+reflect），
+# 配合 30s timeout 单 stage 即可耗光 120s 前端预算。离线批处理可调高。
+# LLM 慢时 2 轮可能累积超 180s（脚本/前端 timeout），可用
+# FINSIGHT_RAG_MAX_ROUNDS=1 降级为单轮（仅 rewrite，无 reflect）。
+_DEFAULT_MAX_ROUNDS = int(os.environ.get("FINSIGHT_RAG_MAX_ROUNDS", "2"))
 
 
 class RetrievalAgentState(TypedDict, total=False):
@@ -42,11 +46,15 @@ class RetrievalAgentState(TypedDict, total=False):
     context_summary: str
     max_rounds: int
     retrieval_limit: int
+    # router 解析出的目标公司（确定性公司对齐，不依赖 LLM 回填 company）
+    target_company_code: str
+    target_company_name: str
 
     # 每轮变化
     current_round: int
     rewrite_hint: str
     rewritten_queries: list[str]
+    sub_questions: list[dict[str, Any]]
     rewrite_strategy: str
 
     # 检索结果
@@ -110,8 +118,16 @@ class RetrievalAgent:
         entities: dict[str, Any] | None = None,
         context_summary: str = "",
         retrieval_limit: int = 5,
+        target_company_code: str = "",
+        target_company_name: str = "",
     ) -> RetrievalAgentState:
-        """执行自适应检索循环，返回最终状态。"""
+        """执行自适应检索循环，返回最终状态。
+
+        target_company_code / target_company_name：由 router 解析出的目标公司。
+        用于确定性公司对齐——当 LLM 改写子问题未回填 company 字段时，
+        仍对非 peer_reference 维度的子问题强制按目标公司过滤，避免跨公司噪声
+        （如同业年报套话）混入。peer_reference 维度保持跨公司检索。
+        """
         initial_state: RetrievalAgentState = {
             "original_query": original_query,
             "intent": intent,
@@ -119,6 +135,8 @@ class RetrievalAgent:
             "context_summary": context_summary,
             "max_rounds": self._max_rounds,
             "retrieval_limit": retrieval_limit,
+            "target_company_code": target_company_code or "",
+            "target_company_name": target_company_name or "",
             "current_round": 0,
             "rewrite_hint": "",
             "all_evidence_items": [],
@@ -151,7 +169,7 @@ class RetrievalAgent:
     # ── 节点实现 ──────────────────────────────────────────────────
 
     def _node_rewrite_query(self, state: RetrievalAgentState) -> dict[str, Any]:
-        """LLM 改写 query，生成多个检索变体。"""
+        """LLM 拆解 query 为多个分析子问题（兼容老的 rewritten_queries 格式）。"""
         current_round = state.get("current_round", 0) + 1
         try:
             payload = self._llm_client.complete_json(
@@ -165,65 +183,112 @@ class RetrievalAgent:
                     "rewrite_hint": state.get("rewrite_hint", ""),
                 },
             )
-            rewritten = payload.get("rewritten_queries") or []
-            if not isinstance(rewritten, list) or not rewritten:
-                rewritten = [state["original_query"]]
+            sub_questions = payload.get("sub_questions") or []
+            # 兼容老格式：rewritten_queries（纯字符串数组）
+            if not sub_questions and payload.get("rewritten_queries"):
+                sub_questions = [
+                    {"query": str(q), "dimension": "", "company": "", "company_code": "", "focus": ""}
+                    for q in payload["rewritten_queries"]
+                ]
+            if not isinstance(sub_questions, list) or not sub_questions:
+                sub_questions = [{"query": state["original_query"], "dimension": "", "company": "", "company_code": "", "focus": ""}]
+            normalized: list[dict[str, Any]] = []
+            for sq in sub_questions:
+                if not isinstance(sq, dict):
+                    sq = {"query": str(sq), "dimension": "", "company": "", "company_code": "", "focus": ""}
+                sq.setdefault("query", state["original_query"])
+                sq.setdefault("dimension", "")
+                sq.setdefault("company", "")
+                sq.setdefault("company_code", "")
+                sq.setdefault("focus", "")
+                normalized.append(sq)
             strategy = str(payload.get("rewrite_strategy") or "")
         except Exception as exc:  # noqa: BLE001
             _logger.warning("query rewrite failed: %s; fallback to original", exc)
-            rewritten = [state["original_query"]]
+            normalized = [{"query": state["original_query"], "dimension": "", "company": "", "company_code": "", "focus": ""}]
             strategy = f"fallback: {type(exc).__name__}"
 
+        # 兼容下游（reflect/finalize 仍消费字符串列表）
+        rewritten_queries = [str(sq.get("query", "")) for sq in normalized]
         return {
             "current_round": current_round,
-            "rewritten_queries": [str(q) for q in rewritten],
+            "sub_questions": normalized,
+            "rewritten_queries": rewritten_queries,
             "rewrite_strategy": strategy,
         }
 
     def _node_hybrid_retrieve(self, state: RetrievalAgentState) -> dict[str, Any]:
-        """对每个改写变体跑 RetrievalFacade，合并结果。
+        """对每个分析子问题跑 RetrievalFacade，合并结果。
 
-        性能优化：多个改写变体并行检索（ThreadPoolExecutor）。
+        性能优化：多个子问题并行检索（ThreadPoolExecutor）。
         bge-m3 embed 和 Qdrant query 都是线程安全的，SQLite FTS5 支持并发读。
+
+        公司对齐过滤：对 direct_disclosure / financial_exposure 且指定了目标公司
+        的子问题，仅保留目标公司证据，剔除异业噪声（竞品/无关行业年报套话）。
+        peer_reference（不带公司）不过滤，单独成桶。
         """
-        rewritten_queries = state.get("rewritten_queries") or [state["original_query"]]
+        sub_questions = state.get("sub_questions") or [
+            {"query": state["original_query"], "dimension": "", "company": "", "company_code": "", "focus": ""}
+        ]
         limit = state.get("retrieval_limit", 5)
+        # router 解析出的目标公司（确定性对齐来源）
+        target_company_code = state.get("target_company_code", "") or ""
+        target_company_name = state.get("target_company_name", "") or ""
         all_evidence = list(state.get("all_evidence_items", []))
         seen_evidence_ids: set[str] = {item.get("evidence_id", "") for item in all_evidence}
         latest_result: RetrievalResult | None = None
 
-        # 并行检索多个变体
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        def _retrieve_one(query_variant: str) -> RetrievalResult | None:
+        def _retrieve_one(sq: dict[str, Any]) -> tuple[RetrievalResult | None, list[dict[str, Any]]]:
+            dimension = str(sq.get("dimension") or "").strip()
+            is_peer = dimension == "peer_reference"
             try:
-                return self._retrieval_facade.retrieve_evidence(
-                    raw_query=query_variant,
+                # 非同业参照维度：用目标公司 code 做索引级硬过滤
+                # （稀疏 FTS5 `company_code=?` + 稠密 Qdrant MatchValue），
+                # 从检索源头排除跨公司噪声；peer_reference 维度保持跨公司。
+                facade_company_code = (
+                    target_company_code if (target_company_code and not is_peer) else None
+                )
+                result = self._retrieval_facade.retrieve_evidence(
+                    raw_query=str(sq.get("query", "")),
                     limit=limit,
+                    company_code=facade_company_code,
                 )
             except Exception as exc:  # noqa: BLE001
-                _logger.warning("retrieve_evidence failed for variant %r: %s", query_variant, exc)
-                return None
+                _logger.warning("retrieve_evidence failed for %r: %s", sq.get("query"), exc)
+                return None, []
+            items = [_evidence_to_dict(e) for e in (result.evidence_items or [])]
+            # 公司对齐过滤（双保险：索引硬过滤 + 结果级匹配）
+            target = str(sq.get("company") or "").strip()
+            # 兜底：LLM 未在子问题回填 company 时，用 router 目标公司做对齐，
+            # 避免「天合光能年报」这类同业披露混入「隆基绿能」的检索结果。
+            if not target and not is_peer and target_company_name:
+                target = target_company_name
+            if target and not is_peer:
+                filtered = [e for e in items if _company_matches(e, target)]
+                # 兜底：过滤后为空则保留原始结果，避免该子问题完全丢失证据
+                items = filtered if filtered else items
+            return result, items
 
-        # 单变体时直接同步调用，避免线程池开销
-        if len(rewritten_queries) <= 1:
-            results = [_retrieve_one(rewritten_queries[0])]
+        # 单子问题时直接同步调用，避免线程池开销
+        if len(sub_questions) <= 1:
+            retrieved = [_retrieve_one(sub_questions[0])]
         else:
-            with ThreadPoolExecutor(max_workers=min(3, len(rewritten_queries))) as executor:
-                futures = {executor.submit(_retrieve_one, q): q for q in rewritten_queries}
-                results = [future.result() for future in as_completed(futures)]
+            with ThreadPoolExecutor(max_workers=min(3, len(sub_questions))) as executor:
+                futures = {executor.submit(_retrieve_one, sq): sq for sq in sub_questions}
+                retrieved = [future.result() for future in as_completed(futures)]
 
-        for result in results:
+        for result, items in retrieved:
             if result is None:
                 continue
             latest_result = result
-            for evidence in result.evidence_items:
-                evidence_dict = _evidence_to_dict(evidence)
-                eid = evidence_dict.get("evidence_id", "")
+            for evidence in items:
+                eid = evidence.get("evidence_id", "")
                 if eid and eid in seen_evidence_ids:
                     continue
                 seen_evidence_ids.add(eid)
-                all_evidence.append(evidence_dict)
+                all_evidence.append(evidence)
 
         if latest_result is None:
             latest_result = RetrievalResult(
@@ -233,12 +298,12 @@ class RetrievalAgent:
             )
 
         all_queries = list(state.get("all_rewritten_queries", []))
-        all_queries.extend(rewritten_queries)
+        all_queries.extend([str(sq.get("query", "")) for sq in sub_questions])
 
         round_trace = list(state.get("rounds_trace", []))
         round_trace.append({
             "round": state.get("current_round", 0),
-            "rewritten_queries": rewritten_queries,
+            "sub_questions": [str(sq.get("query", "")) for sq in sub_questions],
             "evidence_count_this_round": len(all_evidence) - len(state.get("all_evidence_items", [])),
             "total_evidence_count": len(all_evidence),
         })
@@ -261,6 +326,23 @@ class RetrievalAgent:
         """
         current_round = state.get("current_round", 1)
         max_rounds = state.get("max_rounds", self._max_rounds)
+
+        # 收敛保护：连续两轮未检索到新增有效证据，提前终止，
+        # 避免对「永不收敛」的 query 无限空转（仍受 max_rounds 硬上限兜底）。
+        trace = state.get("rounds_trace", [])
+        if len(trace) >= 2:
+            prev_new = trace[-2].get("evidence_count_this_round", 0)
+            curr_new = trace[-1].get("evidence_count_this_round", 0)
+            if prev_new == 0 and curr_new == 0:
+                _logger.info(
+                    "retrieval convergence guard: 2 consecutive rounds with no new evidence, stop at round %d",
+                    current_round,
+                )
+                return {
+                    "sufficient": True,
+                    "reflect_reason": "收敛保护：连续两轮未检索到新增有效证据，提前终止检索循环",
+                    "rewrite_hint": "",
+                }
 
         # 轮次用尽，强制结束
         if current_round >= max_rounds:
@@ -293,18 +375,23 @@ class RetrievalAgent:
                 },
             )
             sufficient = bool(payload.get("sufficient"))
+            coverage = payload.get("coverage_adequate")
             reason = str(payload.get("reason") or "")
+            # 覆盖不全时补充理由，便于排查拆解质量
+            if coverage is False and not reason:
+                reason = "子问题未覆盖关键分析维度（直接披露/财务敞口/同业参照）"
             rewrite_hint = str(payload.get("rewrite_hint") or "")
         except Exception as exc:  # noqa: BLE001
-            # LLM 调用或 JSON 解析失败：默认继续重试（sufficient=False），
-            # 让回溯循环有机会在下一轮用原 query 或新改写重试。
-            # 只有 round >= max_rounds 时才会被 _should_retry 终止。
+            # LLM 调用或 JSON 解析失败：直接终止回溯循环（sufficient=True）。
+            # 之前默认 sufficient=False 会强制跑满 max_rounds，在 LLM 持续
+            # 超时/异常时最坏 6 次串行 LLM，耗光 120s 前端预算。
+            # 终止后用已检索到的 evidence 交给 synthesize，宁缺毋滥。
             _logger.warning(
-                "reflect failed: %s; default to insufficient (will retry)", exc
+                "reflect failed: %s; default to sufficient (terminate to avoid timeout)", exc
             )
-            sufficient = False
-            reason = f"reflect 异常，默认继续重试: {type(exc).__name__}: {exc}"[:200]
-            rewrite_hint = "上一轮 reflect 评估失败，建议尝试不同的改写策略"
+            sufficient = True
+            reason = f"reflect 异常，终止回溯避免超时: {type(exc).__name__}: {exc}"[:200]
+            rewrite_hint = ""
 
         return {
             "sufficient": sufficient,
@@ -370,6 +457,15 @@ class RetrievalAgent:
 
 
 def _load_prompt(filename: str) -> str:
+    """优先用 PromptRegistry（集中 prompts/ 目录），回退到模块内 prompts/ 目录。"""
+    # 1. 尝试 PromptRegistry：retrieval.{filename without .txt}
+    dotted = f"retrieval.{filename.removesuffix('.txt')}"
+    try:
+        from finsight_agent.infra.llm.prompt_registry import get_prompt
+        return get_prompt(dotted).text
+    except Exception:
+        pass
+    # 2. 回退到模块内 prompts/ 目录
     path = _PROMPTS_DIR / filename
     if not path.exists():
         return ""
@@ -392,6 +488,15 @@ def _evidence_to_dict(evidence: Any) -> dict[str, Any]:
         "matched_chunk_id": getattr(evidence, "matched_chunk_id", ""),
         "matched_parent_id": getattr(evidence, "matched_parent_id", ""),
     }
+
+
+def _company_matches(evidence: dict[str, Any], target: str) -> bool:
+    """判断证据是否属于目标公司（双向子串匹配，兼容简称/全称）。"""
+    name = str(evidence.get("company_name") or "").strip()
+    if not name:
+        return False
+    t = target.strip()
+    return t in name or name in t
 
 
 def _dict_to_evidence(item: dict[str, Any]) -> Any:

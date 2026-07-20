@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+
+# Windows 上 torch 自带的 Intel OpenMP(libiomp5md.dll) 与 sklearn/faiss 的
+# MSVC OpenMP(vcomp140.dll) 同进程并存时，torch C 扩展初始化阶段会间歇性
+# SIGSEGV。KMP_DUPLICATE_LIB_OK=TRUE 允许重复 OpenMP 运行时共存，消除崩溃。
+# 必须在 import torch 之前设置，故放在模块加载处。
+# 用强制赋值（非 setdefault）：若环境已存在 falsy 值，setdefault 不会覆盖会漏掉修复。
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 @dataclass(slots=True)
@@ -62,6 +71,38 @@ class BgeM3EmbeddingProvider:
             vector_dim=vector_dim,
         )
 
+    def _resolve_local_snapshot_path(self) -> str | None:
+        """离线定位本地完整 snapshot 目录，绕过可能失效的 hub repo-id 解析器。
+
+        适用场景：本地 HF 缓存为非标准结构（如跨文件系统拷贝后 blobs/ 为空、
+        snapshots/ 为普通副本）时，huggingface_hub 的离线解析会失败并回退联网。
+        直接指向含 config.json + 权重的 snapshot 目录并用 local_files_only 加载，
+        可完全离线使用本地模型。
+        """
+        from pathlib import Path
+
+        hf_home = Path(os.environ.get("HF_HOME", str(Path.home() / ".cache" / "huggingface")))
+        hub = hf_home / "hub"
+        if not hub.exists():
+            return None
+
+        key = self.model_name.lower().replace("/", "--")
+        candidates: list[Path] = []
+        for model_dir in hub.glob("models--*"):
+            if key not in model_dir.name.lower():
+                continue
+            for snap in sorted(model_dir.glob("snapshots/*")):
+                if not snap.is_dir():
+                    continue
+                has_config = (snap / "config.json").exists()
+                has_weights = (snap / "model.safetensors").exists() or (
+                    snap / "pytorch_model.bin"
+                ).exists()
+                if has_config and has_weights:
+                    candidates.append(snap)
+
+        return str(candidates[-1]) if candidates else None
+
     def _load_model(self) -> Any | None:
         try:
             from sentence_transformers import SentenceTransformer
@@ -72,7 +113,20 @@ class BgeM3EmbeddingProvider:
             # GPU 优先：GTX 1650 4GB 显存 + batch_size=4 + 500 字截断可稳定运行（7 chunks/s）
             # CPU 模式仅 0.3 chunks/s，9706 chunks 需 9 小时，不可行
             import torch
+
             device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            # 优先离线直读本地 snapshot 目录，绕过 hub repo-id 解析器
+            # （应对本地缓存非标准、离线解析失败的问题）。
+            local_path = self._resolve_local_snapshot_path()
+            if local_path is not None:
+                os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+                return SentenceTransformer(
+                    local_path, local_files_only=True, device=device
+                )
+
+            # 回退：标准环境（缓存规范或联网可用）下用 repo-id 加载
             return SentenceTransformer(self.model_name, device=device)
         except Exception:
             return None

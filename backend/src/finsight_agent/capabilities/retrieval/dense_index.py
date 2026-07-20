@@ -151,6 +151,31 @@ class DenseChunkIndex:
 
         self._store.close()
 
+    def stored_vector_dim(self) -> int | None:
+        """返回已存在 collection 的向量维度；collection 不存在或读取失败则返回 None。
+
+        用于启动期维度一致性守卫：索引由真实 bge-m3(1024 维) 构建，
+        若查询侧 provider 维度不一致（如误走 384 维 fallback）应尽早报错。
+        """
+
+        try:
+            if not self._store.client.collection_exists(
+                collection_name=self._collection_name
+            ):
+                return None
+            info = self._store.client.get_collection(self._collection_name)
+            vectors = getattr(getattr(info, "config", None), "params", None)
+            vectors = getattr(vectors, "vectors", None)
+            if vectors is None:
+                return None
+            # 单向量：VectorParams；命名向量：dict[str, NamedVectorParams]
+            if isinstance(vectors, dict):
+                first = next(iter(vectors.values()), None)
+                return getattr(first, "size", None)
+            return getattr(vectors, "size", None)
+        except Exception:
+            return None
+
     def _normalize_chunk_row(self, row: dict[str, object]) -> dict[str, object]:
         """把 children.jsonl 记录映射成 Qdrant payload。"""
 

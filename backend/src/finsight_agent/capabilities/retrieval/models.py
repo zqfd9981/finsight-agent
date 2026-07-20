@@ -160,6 +160,8 @@ class EvidenceItem:
     company_name: str
     doc_type: str
     section_path: list[str] = field(default_factory=list)
+    # 报告期（年报 / 公告年份），用于前端来源标注；命中 chunk 自带，组装时透传
+    report_year: str = ""
 
 
 @dataclass(slots=True)
