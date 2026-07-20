@@ -1,0 +1,407 @@
+# 检索策略分类器训练集标注审计报告
+
+> 生成时间：2026-07-18  |  数据源：backend/training/.../data/labeled/labeled.jsonl（301 条）
+> 对照标准：LABELING.md v4.0
+
+## 0. 背景
+用户 query「红海局势会对隆基绿能产生什么影响」被分类器判为 event_primary（只查外部新闻、关掉本地公司数据），导致后续 stage 降级。经核查训练模型本身在线（val_f1=0.901），问题出在**训练集标注**——而非模型能力。
+
+## 1. 数据集概况
+- 总样本：**301** 条
+- 标签分布：event_primary=126，dual_primary=76，disclosure_primary=99
+- 来源构成：前 6 条 transferred_from_event_eval；其余 human_authored 与 human_reviewed（后者含大量乱码 notes 的 v6 复核）
+
+## 2. 判定标准（LABELING.md v4.0 摘要）
+- **event_primary**：宏观/政策/地缘事件对 A 股整体、板块、风格、估值、情绪、风险偏好的**广义/机制/板块层面**影响 -> 首跳只看事件
+- **disclosure_primary**：公司内生事件、主语落公司披露
+- **dual_primary**：**明确落到具体公司/候选标的** + 公司级业绩/订单/利润弹性/披露验证
+
+## 3. 三个系统性问题
+
+### 3.1 手册口径 vs 数据实践不一致
+手册明确 dual 仅限「具体公司/候选标的」，但数据集把大量「**板块 + 业绩/订单/利润弹性**」也标成了 dual（如 rsc_gen_239 白酒板块龙头、rsc_gen_216 家电出口板块、rsc_gen_227 银行板块净息差、rsc_gen_196 集运板块业绩传导…）。即数据集实际把 dual 边界放宽到板块级，与手册口径并存，模型学到的边界天然模糊。
+
+### 3.2 标签内部矛盾（同主题异标）
+表面结构几乎一样的 query，标签却相反：
+
+| 样本A (event) | 样本B (dual) | 共同点 |
+|---|---|---|
+| rsc_gen_008 集运板块的逻辑还在不在 | rsc_ha_009 油运板块的传导 | 红海+板块+逻辑/传导 |
+| rsc_gen_195 集运板块逻辑支撑持续多久 | rsc_gen_196 集运板块业绩传导节奏 | 红海+集运板块 |
+| rsc_gen_197 航运板块估值要不要重估 | rsc_gen_262 险企估值逻辑重塑 | 板块+估值/逻辑 |
+| rsc_gen_228 银行股估值锚的影响 | rsc_gen_227/238 银行板块净息差 | MLF/利率+银行 |
+| rsc_gen_219 创新药出海板块影响 | rsc_gen_274 恒瑞等创新药企业绩 | 创新药+板块/公司 |
+| rsc_gen_221 数据要素板块估值锚 | rsc_gen_222 数据要素龙头公司业绩 | 数据要素+板块/龙头 |
+| rsc_gen_235 电池厂上游成本传导 | rsc_gen_200/257 隆基通威/锂矿股 | 锂电+公司 |
+
+这些对子让模型无法学到稳定边界。
+
+### 3.3 组合性覆盖缺口（用户 query 的真正根因）
+训练里「外部事件 x 公司」是按**现实共现**配对的：
+- 红海/胡塞 <-> 航运/油运公司（rsc_evt_005 / ha_001 / ha_006 / gen_196 / gen_198…）
+- 光伏反内卷/硅料限产 <-> 隆基绿能/通威（rsc_ha_015 / gen_199/200/201/202）
+- 关税 <-> 消费电子（立讯/歌尔）
+- 半导体扶持 <-> 北方华创/中芯
+
+**但没有任何一条把「红海（地缘事件）」与「隆基绿能（光伏公司）」配对。** 用户 query「红海局势会对隆基绿能产生什么影响」正是这个**未见过的跨主题组合（OOD）**。分类器看到「红海」-> 联想到航运（dual 但限定航运公司），看到「隆基绿能」-> 训练里隆基只和光伏事件/自身披露出现（多为 disclosure/dual 但限定光伏事件），两者冲突 -> 在 event 与 disclosure 间摇摆（margin=0.307, top2=disclosure）-> 落到 event_primary。
+
+关键点：训练集有「光伏反内卷 + 隆基 = dual」（rsc_ha_015、rsc_gen_200），证明「隆基 + 事件影响 = dual」本应可学；但因没有「**任意事件 + 任意公司 = dual**」的泛化样本，模型不会把红海也套到隆基上。
+
+## 4. 不合理 / 建议复核样本清单
+
+| sample_id | query | 当前label | 判定 | 建议/理由 |
+|---|---|---|---|---|
+| rsc_gen_008 | 胡塞武装对商船袭击频率再加码，集运板块的逻辑还在不在？ | event_primary | 矛盾->建议dual | 同主题 rsc_ha_009「油运板块的传导」=dual；「集运板块逻辑」与「板块传导」同构，应统一为 dual |
+| rsc_gen_195 | 胡塞武装袭击再加码，对集运板块逻辑支撑还能持续多久？ | event_primary | 矛盾->建议dual | 与 rsc_gen_196「集运板块业绩传导节奏」同主题异标；「逻辑支撑持续」需公司数据，应 dual |
+| rsc_gen_197 | 红海局势进入常态化预期，航运板块估值要不要重估？ | event_primary | 矛盾->建议dual | 与 rsc_gen_262「险企估值逻辑重塑」同构却异标；「估值重估」需看成分股，应 dual |
+| rsc_gen_228 | MLF 操作利率不动，对银行股估值锚的影响有多大？ | event_primary | 矛盾->建议dual | 与 rsc_gen_227/238「银行板块净息差」同主题异标；MLF+银行，应 dual |
+| rsc_gen_219 | FDA 临床数据要求收紧，对国产创新药出海板块影响节奏？ | event_primary | 矛盾->建议dual | 与 rsc_gen_274「恒瑞等创新药企业绩」/rsc_gen_218「头部biotech」同主题异标；出海板块影响需公司数据，应 dual |
+| rsc_gen_221 | 数据要素 X 试点扩容以后，对 A 股数据要素板块估值锚影响？ | event_primary | 矛盾->建议dual | 与 rsc_gen_222「数据要素龙头公司业绩」同主题异标；应 dual |
+| rsc_gen_235 | 印尼镍矿出口政策又变，对电池厂上游成本传导节奏？ | event_primary | 矛盾->建议dual | 与 rsc_gen_200「隆基/通威」/rsc_gen_257「锂矿股」同主题异标；电池厂上游成本需公司数据，应 dual |
+| rsc_gen_236 | 印尼镍矿出口配额调整，对 A 股锂电材料板块成本预期影响？ | event_primary | 矛盾->建议dual | 与 rsc_gen_257「锂矿股业绩」同主题异标；锂电材料板块成本预期应 dual |
+| rsc_gen_262 | IFRS17 切换以后，对 A 股险企估值逻辑重塑影响？ | dual_primary | 边界 | 「险企估值逻辑重塑」按手册(板块+估值)应为 event，但数据集 dual 惯例(板块+估值逻辑)又标 dual；与 rsc_gen_197 必须统一 |
+| rsc_gen_263 | 央企战新产业基金规模扩张，对 A 股并购重组生态影响？ | event_primary | 边界 | 「并购重组生态」可 event 可 dual，需定口径 |
+| rsc_gen_269 | 城中村改造推进到现在，对 A 股地产链条订单传导多大？ | event_primary | 边界->建议dual | 与 rsc_gen_279「地产链融资节奏」同主题异标；应 dual |
+| rsc_gen_271 | 公募 REITs 新政落地，对 A 股基建股估值修复影响？ | event_primary | 边界->建议dual | 「基建股估值修复」与 rsc_gen_278/280「整车/白电业绩」同构应 dual |
+| rsc_gen_272 | 金融稳定法推出，对 A 股金融板块风险定价影响？ | event_primary | 边界->建议dual | 「金融板块风险定价」与 dual 组「板块+影响」同构，建议 dual |
+| rsc_gen_277 | ETF 资金大额流入，对 A 股核心资产估值修复影响多大？ | event_primary | 边界->建议dual | 「核心资产估值修复」与 dual 组同构，建议 dual |
+| rsc_gen_251 | 央企中国特色估值体系推进，对 A 股中字头估值修复节奏？ | event_primary | 边界->建议dual | 「中字头估值修复」与 rsc_gen_262 同构，若险企标 dual 则此处也应 dual，需统一 |
+| rsc_gen_252 | 国资委新一轮考核落地，对 A 股国企估值重塑节奏？ | event_primary | 边界->建议dual | 「国企估值重塑」同上 |
+| rsc_gen_253 | 退市新规执行这一年，对 A 股壳价值/小盘股估值压力节奏？ | event_primary | 边界->建议dual | 「壳价值/小盘股估值压力」同上 |
+| rsc_gen_255 | 新质生产力相关产业目录扩容，对 A 股科技股估值修复影响？ | event_primary | 边界->建议dual | 「科技股估值修复」同上 |
+| rsc_gen_187 | 美联储 9 月降息预期反复，A 股哪些方向是直接 beta？ | event_primary | 边界 | 「A股哪些方向是直接beta」板块级机制问法，按手册 event 合理，但与 dual 组边界模糊 |
+| rsc_gen_189 | 美联储紧缩结束后，A 股消费股估值修复节奏如何？ | event_primary | 边界 | 「消费股估值修复节奏」同上 |
+| rsc_gen_190 | 美联储维持高利率，对 A 股高股息龙头直接利好还是边际减弱？ | event_primary | 边界 | 「高股息龙头直接利好」龙头级，偏 dual 更稳 |
+| rsc_gen_193 | 美国新关税框架对纺织/家电 A 股出口板块弹性怎么排序？ | event_primary | 边界 | 「纺织/家电出口板块弹性排序」板块级，但与 rsc_gen_216/217 同构应 dual |
+| rsc_gen_203 | OPEC+ 减产这一轮被 price in 完后，A 股油气板块估值锚怎么走？ | event_primary | 边界 | 「油气板块估值锚」板块+估值，按手册 event 合理 |
+| rsc_gen_205 | OPEC+ 内部分歧加大，对油气板块情绪面冲击有多深？ | event_primary | 边界 | 「油气板块情绪面」同上 |
+| rsc_gen_211 | 中东避险情绪升温，对 A 股黄金股估值修复节奏的影响？ | event_primary | 边界 | 「黄金股估值修复」板块+估值，按手册 event 合理（黄金类全标 event，内部一致） |
+| rsc_gen_249 | 黄金 ETF 大额申购持续，对 A 股黄金股估值修复节奏影响？ | event_primary | 边界 | 「黄金股估值修复」同上 |
+| rsc_gen_250 | 央行连续增持黄金储备，对 A 股黄金板块情绪面影响？ | event_primary | 边界 | 「黄金板块情绪面」同上 |
+| rsc_gen_259 | 猪价反转以后，对 A 股养殖链业绩弹性看哪一段？ | event_primary | 边界->建议dual | 「养殖链业绩弹性」与 rsc_gen_258「船厂业绩弹性」同构应 dual |
+| rsc_gen_260 | 全球粮价上行叠加国内干旱，对 A 股种业股景气度推动多大？ | event_primary | 边界->建议dual | 「种业股景气度」同上应 dual |
+| rsc_gen_264 | 跨境理财通 2.0 落地，对南向资金额度使用节奏怎么走？ | event_primary | 边界 | 「南向资金额度使用」无 A 股公司，event 合理 |
+| rsc_gen_265 | 上海自贸区本外币一体化政策落地，对跨国公司资金运作影响？ | event_primary | 合理 | 主语非 A 股（跨国公司），按 v5 改判 event 正确 |
+| rsc_gen_267 | 海南自贸港加工增值免税落地，对企业实际利用率到位没有？ | event_primary | 合理 | 主语非 A 股（企业），event 正确 |
+| rsc_gen_266 | 北交所做市商扩容和转板机制，对小盘股流动性提振多大？ | event_primary | 边界->建议dual | 「小盘股流动性提振」与 dual 组同构，建议 dual |
+| rsc_gen_268 | 国资委新一轮一利五率考核，对央企利润释放节奏影响多大？ | event_primary | 边界->建议dual | 「央企利润释放节奏」与 rsc_gen_092 同主题，建议 dual |
+
+> 说明：标记为「边界」的样本按手册（板块+估值/情绪->event）本身不算错，但与 dual 组「板块+业绩」的边界模糊，建议统一口径后再决定。disclosure_primary 组（rsc_gen_094~153 等）绝大多数为公司内生事件、无外部事件触发，**基本合理**，仅 rsc_gen_107（隆基HPBC）属边界但可接受。
+
+## 5. 对用户 query 的结论
+「红海局势会对隆基绿能产生什么影响」= 外部事件 + **具体单公司(隆基绿能)** + 影响 -> 按手册 dual 规则（明确落到具体公司）**本应标 dual_primary**。训练集 rsc_ha_015 / rsc_gen_200 也是这个标签。分类器判错不是因为标签把它标成了 event，而是：
+(a) 红海<->隆基 的跨主题组合在训练里不存在（覆盖缺口 3.3）；
+(b) 板块/公司边界本身标注不一致（3.1/3.2），进一步稀释了「公司+事件->dual」信号。
+
+## 6. 修复建议
+- **P1（数据）**：补「跨主题组合」样本（事件 x 任意公司），至少覆盖 红海 x 非航运公司、关税 x 非消费电子公司 等，教模型「任意事件+任意公司=dual」。
+- **P1（数据）**：按统一口径重标 3.2 的矛盾对——建议规则：**凡涉及具体公司/候选标的 或 板块级业绩/订单/利润弹性 -> dual；纯板块估值/情绪/机制 -> event**。
+- **P1（文档）**：把 3.1 的偏离写死进 LABELING.md，明确「板块+业绩/订单/利润弹性」算 dual，消除手册与实践歧义。
+- **P0（代码）**：trained_strategy_classifier.py 加 KMP_DUPLICATE_LIB_OK=TRUE 守卫，防生产环境静默回退 Stub（与之前 bge-m3 同类陷阱）。
+- **兜底（代码）**：_should_use_local_rag 在「外部返回 0 条相关」时也触发本地 RAG/披露源，任何未来误判不再整段降级。
+
+## 附录：全部 301 条枚举
+
+| # | sample_id | query | label | source | 主题 | 标记 |
+|---|---|---|---|---|---|---|
+| 1 | rsc_evt_001 | 红海局势最近怎么了？ | event_primary | transferred_from_event_eval | 红海/航运 |  |
+| 2 | rsc_evt_002 | 美国加征关税会影响哪些行业？ | event_primary | transferred_from_event_eval | 宏观/政策/地缘 |  |
+| 3 | rsc_evt_003 | 宁德时代扩产公告意味着什么？ | disclosure_primary | transferred_from_event_eval | 其他 |  |
+| 4 | rsc_evt_004 | 某公司业绩预告是否释放积极信号？ | disclosure_primary | transferred_from_event_eval | 其他 |  |
+| 5 | rsc_evt_005 | 红海局势升级利好哪些A股航运股？ | dual_primary | transferred_from_event_eval | 红海/航运 |  |
+| 6 | rsc_evt_006 | 关税升级对哪些消费电子公司冲击更大？ | dual_primary | transferred_from_event_eval | 产业/科技/消费 |  |
+| 7 | rsc_ha_001 | 红海局势升级利好哪些 A 股航运公司？ | dual_primary | human_authored | 红海/航运 |  |
+| 8 | rsc_ha_002 | 红海局势最近发生了什么 | event_primary | human_authored | 红海/航运 |  |
+| 9 | rsc_ha_003 | 美国新关税政策主要影响哪些方向 | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 10 | rsc_ha_004 | 这家公司业绩预告是否超预期 | disclosure_primary | human_authored | 其他 |  |
+| 11 | rsc_ha_005 | 关税升级对哪些消费电子公司冲击最大 | dual_primary | human_authored | 产业/科技/消费 |  |
+| 12 | rsc_ha_006 | 红海航运扰动对 A 股航运链的影响 | dual_primary | human_reviewed | 红海/航运 |  |
+| 13 | rsc_ha_007 | OPEC+减产对国际油价影响有多大 | event_primary | human_authored | 资源/周期 |  |
+| 14 | rsc_ha_008 | 国内光伏行业反内卷政策进展如何 | event_primary | human_authored | 产业/科技/消费 |  |
+| 15 | rsc_ha_009 | 地缘冲突升温对油运板块的传导 | dual_primary | human_reviewed | 红海/航运 |  |
+| 16 | rsc_ha_010 | 比亚迪一季度业绩预告是否超预期 | disclosure_primary | human_authored | 其他 |  |
+| 17 | rsc_ha_011 | 中芯国际产能利用率提升对业绩影响 | disclosure_primary | human_authored | 其他 |  |
+| 18 | rsc_ha_012 | 美联储议息会议对 A 股流动性影响 | event_primary | human_reviewed | 宏观/政策/地缘 |  |
+| 19 | rsc_ha_013 | 美联储6月议息会议传递了什么信号 | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 20 | rsc_ha_014 | 招商轮船分红方案怎么看 | disclosure_primary | human_authored | 其他 |  |
+| 21 | rsc_ha_015 | 光伏行业反内卷对隆基绿能业绩影响 | dual_primary | human_authored | 产业/科技/消费 | 用户query同构 |
+| 22 | rsc_gen_001 | 美联储议息这周要开了，现在市场对降息节奏的预期走到哪了？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 23 | rsc_gen_002 | 美联储 9 月降息预期又被打回去，市场情绪这次为啥反应这么大？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 24 | rsc_gen_003 | 这一轮美联储从加息到降息切换，背后驱动到底是衰退交易还是软着陆交易？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 25 | rsc_gen_004 | 美联储点阵图修正以后，9 月降息 25 还是 50 的概率走到哪了？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 26 | rsc_gen_005 | 美联储宽松节奏分歧加大，传导到新兴市场资金面会是哪条路径？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 27 | rsc_gen_006 | 红海绕航成本还在往上走？苏伊士运量回到疫情前没有？ | event_primary | human_authored | 红海/航运 |  |
+| 28 | rsc_gen_007 | 红海危机传导到集装箱运费，现货指数这一周涨了几个点？ | event_primary | human_authored | 红海/航运 |  |
+| 29 | rsc_gen_008 | 胡塞武装对商船袭击频率再加码，集运板块的逻辑还在不在？ | event_primary | human_reviewed | 红海/航运 | 矛盾->建议dual |
+| 30 | rsc_gen_009 | 为什么这一轮红海绕航对航运股股价的拉动比上次更剧烈？ | dual_primary | human_reviewed | 红海/航运 |  |
+| 31 | rsc_gen_010 | 红海绕航常态化预期下，集运和油运基本面分化会怎么走？ | event_primary | human_authored | 红海/航运 |  |
+| 32 | rsc_gen_011 | 美国对华 301 关税新一轮调整走到哪一步了，离落地还有多远？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 33 | rsc_gen_012 | 新一轮美国关税落地，对消费电子链条实际订单冲击到底有多大？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 34 | rsc_gen_013 | 美国关税豁免清单一直在动，到底哪些品类被划进去了？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 35 | rsc_gen_014 | 为什么这轮关税的产业链外溢效应比上一轮明显得多？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 36 | rsc_gen_015 | 特朗普 2.0 关税框架落地后，市场预期是不是早就被打满了？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 37 | rsc_gen_016 | 光伏反内卷开了一堆会以后，硅料价格触底了么？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 38 | rsc_gen_017 | 这一轮光伏自律协议能撑多久？历史违约案例给我们什么参照？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 39 | rsc_gen_018 | 硅料龙头联合限产以后，组件价格传导是不是已经失败？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 40 | rsc_gen_019 | 为什么光伏这轮反内卷推进比钢铁慢得多，是机制不一样么？ | event_primary | human_authored | 资源/周期 |  |
+| 41 | rsc_gen_020 | 光伏反内卷对二三线组件厂是利好还是利空？谁先被淘汰？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 42 | rsc_gen_021 | 人民币这一波跌到哪了？7.3 上方短期能稳住么？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 43 | rsc_gen_022 | 美元降息预期反复之下，人民币贬值压力从哪儿来？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 44 | rsc_gen_023 | 美元降息节奏放缓以后，人民币汇率后续会怎么走？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 45 | rsc_gen_024 | 汇率破 7.3 以后，出口企业结汇意愿有没有显著抬升？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 46 | rsc_gen_025 | 央行中间价信号和即期价的偏离幅度这么离谱，正常么？ | event_primary | human_authored | 其他 |  |
+| 47 | rsc_gen_026 | OPEC+ 这轮自愿减产实际减量是多少？达标率有说法么？ | event_primary | human_authored | 资源/周期 |  |
+| 48 | rsc_gen_027 | OPEC+ 减产被市场 price in 完了么？油价上行的边际定价逻辑变了吗？ | event_primary | human_authored | 资源/周期 |  |
+| 49 | rsc_gen_028 | OPEC+ 内部分歧加大，沙特和俄罗斯这次到底什么立场？ | event_primary | human_authored | 资源/周期 |  |
+| 50 | rsc_gen_029 | 台海军演常态化以后，对半导体设备国产替代预期有多大提振？ | event_primary | human_reviewed | 产业/科技/消费 |  |
+| 51 | rsc_gen_030 | 为什么台海地缘风险最近又被拉高？背后是谁在动作？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 52 | rsc_gen_031 | 台海军演和军工股之间到底是短期博弈还是中期配置逻辑？ | event_primary | human_reviewed | 产业/科技/消费 |  |
+| 53 | rsc_gen_032 | 伊朗和以色列冲突一反复，油价到底是脉冲反应还是趋势反转？ | event_primary | human_authored | 资源/周期 |  |
+| 54 | rsc_gen_033 | 中东局势升级避险情绪下，黄金股是趋势机会还是事件博弈？ | event_primary | human_reviewed | 资源/周期 |  |
+| 55 | rsc_gen_034 | 中东航线战争险费率被上调那么猛，对油运成本传导算得过来么？ | event_primary | human_reviewed | 红海/航运 |  |
+| 56 | rsc_gen_035 | 新能源车购置税减免明年到底退不退坡？市场预期已经打满了没？ | event_primary | human_authored | 其他 |  |
+| 57 | rsc_gen_036 | 光伏地面电站补贴政策接下来怎么调？竞价机制会有变化么？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 58 | rsc_gen_037 | 储能补贴新政落地，独立储能商业模式跑通了么？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 59 | rsc_gen_038 | 钢铁新一轮产能去化到底是行政命令还是市场化倒逼？ | event_primary | human_authored | 资源/周期 |  |
+| 60 | rsc_gen_039 | 化工产能过剩到什么程度？价差能给个直观数字么？ | event_primary | human_authored | 资源/周期 |  |
+| 61 | rsc_gen_040 | 这轮化工出清节奏比上一轮慢很多，是因为下游需求更弱么？ | event_primary | human_authored | 资源/周期 |  |
+| 62 | rsc_gen_041 | AI 算力紧缺传导到光模块订单，现在订单景气度到什么阶段了？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 63 | rsc_gen_042 | 美国对华 AI 芯片管制升级，对国产 GPU 替代节奏影响有多大？ | event_primary | human_reviewed | 产业/科技/消费 |  |
+| 64 | rsc_gen_043 | HBM 紧缺传导下，存储芯片涨价能延续到什么时候？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 65 | rsc_gen_044 | 退市新规执行这一年，A股退市节奏是不是真的明显加快？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 66 | rsc_gen_045 | 注册制深化推进到现在，IPO 节奏和审核理念发生了哪些实质变化？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 67 | rsc_gen_046 | 并购六条落地半年，并购重组市场真激活了么？披露案例规模上来没？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 68 | rsc_gen_047 | 创新药 BD 出海又破纪录，单笔金额到底能有多大？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 69 | rsc_gen_048 | FDA 临床数据要求收紧以后，国产创新药出海节奏会不会踩刹车？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 70 | rsc_gen_049 | 为什么这一波创新药出海估值修复能涨这么多？ | event_primary | human_reviewed | 产业/科技/消费 |  |
+| 71 | rsc_gen_050 | 锂价这一轮触底没？锂电产业链库存去化到哪个阶段了？ | event_primary | human_authored | 资源/周期 |  |
+| 72 | rsc_gen_051 | 化工景气磨底到现在，资本开支是不是已经开始收缩？ | event_primary | human_authored | 资源/周期 |  |
+| 73 | rsc_gen_052 | 化工子行业哪个环节先触底反弹？MDI 还是 PTA 链？ | event_primary | human_authored | 资源/周期 |  |
+| 74 | rsc_gen_053 | 数据要素 X 试点扩容到几个城市了？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 75 | rsc_gen_054 | 公共数据授权运营推进以后，企业端数据资产入表有没有实际案例落地？ | event_primary | human_authored | 其他 |  |
+| 76 | rsc_gen_055 | 大基金三期投资重点，从硅片往哪个环节继续延伸？ | event_primary | human_authored | 其他 |  |
+| 77 | rsc_gen_056 | 国家大基金三期落地以后，国产半导体设备订单确定性到底提升多少？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 78 | rsc_gen_057 | 万亿特别国债发行节奏，对基建链条的资金到位影响有多大？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 79 | rsc_gen_058 | 50 年超长期特别国债，机构承接意愿到底怎么样？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 80 | rsc_gen_059 | 日本央行加息以后，全球 carry trade 平仓节奏怎么走？ | event_primary | human_authored | 其他 |  |
+| 81 | rsc_gen_060 | 日元升值以后，亚太多头逻辑是不是要重估一遍？ | event_primary | human_authored | 其他 |  |
+| 82 | rsc_gen_061 | 中国稀土出口管制升级，对磁材企业到底是利好还是利空？ | event_primary | human_authored | 资源/周期 |  |
+| 83 | rsc_gen_062 | 缅甸稀土进口受阻以后，中重稀土价格弹性到底有多大？ | event_primary | human_authored | 资源/周期 |  |
+| 84 | rsc_gen_063 | 央行 MLF 缩量续作，是不是要转向收紧？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 85 | rsc_gen_064 | 这一轮 MLF 操作利率纹丝不动，背后政策意图到底是什么？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 86 | rsc_gen_065 | 退市新规对 ST 板块的杀伤是阶段性冲击还是趋势性出清？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 87 | rsc_gen_066 | 面值退市规则收紧以后，1 元股出清速度到底有多快？ | event_primary | human_reviewed | 金融/央企/估值 |  |
+| 88 | rsc_gen_067 | 央企战新产业基金这轮规模做到多大了？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 89 | rsc_gen_068 | 央企并购基金接连落地以后，A 股并购重组生态到底有没有变化？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 90 | rsc_gen_069 | 跨境理财通 2.0 落地，南向资金额度用得怎么样？ | event_primary | human_authored | 其他 |  |
+| 91 | rsc_gen_070 | 跨境理财通扩容，对香港本地银行股业绩弹性有多大？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 92 | rsc_gen_071 | 上海自贸区本外币一体化政策落地，对跨国公司资金运作影响有多大？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 93 | rsc_gen_072 | 自贸区离岸贸易税收政策，优化到具体什么程度？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 94 | rsc_gen_073 | 海上风电新一轮核准节奏，是不是要加快了？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 95 | rsc_gen_074 | 新型储能‘十四五’目标提前完成，‘十五五’会不会再来一轮顶层政策？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 96 | rsc_gen_075 | 集成电路研发费用加计扣除新政落地，设备厂研发开支策略有没有调整？ | event_primary | human_authored | 其他 |  |
+| 97 | rsc_gen_076 | 海南自贸港加工增值 30% 内销免关税落地，企业实际利用率到位没有？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 98 | rsc_gen_077 | 科创板第五套重启以后，未盈利硬科技上市节奏是不是要加快了？ | event_primary | human_authored | 其他 |  |
+| 99 | rsc_gen_078 | 全国统一大市场建设推进到现在，自上而下的政策方向发生了哪些实质变化？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 100 | rsc_gen_079 | 巴拿马运河运力受限，全球航运瓶颈这次是不是又被打开了？ | event_primary | human_authored | 红海/航运 |  |
+| 101 | rsc_gen_080 | 北交所做市商扩容和转板机制落地，对小盘股流动性提振有多大？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 102 | rsc_gen_081 | 印尼镍矿出口政策又变了，对电池厂上游成本传导算得过来么？ | event_primary | human_authored | 资源/周期 |  |
+| 103 | rsc_gen_082 | 猪价反转以后，养殖链业绩弹性看哪一段？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 104 | rsc_gen_083 | 全球粮价上行叠加国内干旱，对种业股景气度的推动有多大？ | event_primary | human_authored | 其他 |  |
+| 105 | rsc_gen_084 | 全国碳市场扩容到钢铁、水泥、铝行业，对相关板块业绩贡献到底有多大？ | dual_primary | human_authored | 资源/周期 |  |
+| 106 | rsc_gen_085 | IFRS17 切换以后，新业务价值披露口径变化，险企估值逻辑是不是要重估一遍？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 107 | rsc_gen_086 | 苹果产业链往越南和印度迁移这么猛，对国内精密制造龙头到底冲击多大？ | dual_primary | human_authored | 其他 |  |
+| 108 | rsc_gen_087 | 央行在二级市场买卖国债，是要重启类似 QE 那套操作么？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 109 | rsc_gen_088 | 消费税征收环节后移落地，对白酒和化妆品行业业绩影响有多大？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 110 | rsc_gen_089 | 跨境电商出口监管收紧，对头部卖家实际业绩冲击有多大？ | event_primary | human_authored | 宏观/政策/地缘 |  |
+| 111 | rsc_gen_090 | 新质生产力相关产业目录扩容到什么规模了，覆盖到底有多广？ | event_primary | human_authored | 其他 |  |
+| 112 | rsc_gen_091 | 城中村改造推进到现在，对地产链条的实际订单传导有多大？ | event_primary | human_authored | 产业/科技/消费 |  |
+| 113 | rsc_gen_092 | 国资委新一轮‘一利五率’考核落地，对央企利润释放节奏影响有多大？ | event_primary | human_authored | 金融/央企/估值 |  |
+| 114 | rsc_gen_093 | HJT 电池量产效率再破纪录，对设备龙头订单确定性提升多少？ | dual_primary | human_reviewed | 产业/科技/消费 |  |
+| 115 | rsc_gen_094 | 工业富联 Q3 服务器代工毛利率这一轮是被什么变量压住的？ | disclosure_primary | human_authored | 其他 |  |
+| 116 | rsc_gen_095 | 工业富联北美大客户 AI 服务器订单确认节奏怎么走？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 117 | rsc_gen_096 | 中航沈飞新机型订单这一轮的毛利率预期到底能不能兑现？ | disclosure_primary | human_authored | 其他 |  |
+| 118 | rsc_gen_097 | 中航沈飞这一轮产能扩张节奏，对应下游订单储备匹配度怎么样？ | disclosure_primary | human_authored | 其他 |  |
+| 119 | rsc_gen_098 | 牧原股份这一轮出栏量兑现节奏对应到完全成本变化大致几个点？ | disclosure_primary | human_authored | 其他 |  |
+| 120 | rsc_gen_099 | 牧原股份现金分红这一轮会不会跟着利润走一档？ | disclosure_primary | human_authored | 其他 |  |
+| 121 | rsc_gen_100 | 万华化学聚氨酯这一轮价格触底以后，毛利率反弹节奏被什么卡住？ | disclosure_primary | human_authored | 其他 |  |
+| 122 | rsc_gen_101 | 万华化学这一轮海外 MDI 价格调整到位，对盈利预测下修风险有多大？ | disclosure_primary | human_authored | 其他 |  |
+| 123 | rsc_gen_102 | 中国船舶这一轮新接订单价格水平相对历史周期的位置在哪？ | disclosure_primary | human_authored | 其他 |  |
+| 124 | rsc_gen_103 | 中国船舶新一期股权激励解锁条件，对应行业景气确认节奏是不是偏紧？ | disclosure_primary | human_authored | 其他 |  |
+| 125 | rsc_gen_104 | 比亚迪海外门店这一波扩张，单店日均销售比国内高还是低？ | disclosure_primary | human_authored | 其他 |  |
+| 126 | rsc_gen_105 | 贵州茅台基酒产能这一轮扩出来以后，会不会反过来压制出厂价？ | disclosure_primary | human_authored | 其他 |  |
+| 127 | rsc_gen_106 | 招商银行对公贷款这一轮到底在做哪类客户？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 128 | rsc_gen_107 | 隆基绿能 HPBC 出货爬坡，对 BC 一体化组件的市占率提升有多快？ | disclosure_primary | human_authored | 产业/科技/消费 | 用户query同构 |
+| 129 | rsc_gen_108 | 立讯精密越南/印度产能扩张到现在的真实成本结构是什么样？ | disclosure_primary | human_authored | 其他 |  |
+| 130 | rsc_gen_109 | 阳光电源户用储能产能爬坡，欧洲分销渠道反馈跟得上吗？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 131 | rsc_gen_110 | 紫金矿业海外金矿并购整合这段时间，金的单位成本曲线变化大吗？ | disclosure_primary | human_authored | 其他 |  |
+| 132 | rsc_gen_111 | 东方财富转债募集说明书核心数据到底给不给力？ | disclosure_primary | human_authored | 其他 |  |
+| 133 | rsc_gen_112 | 海康威视机器人业务分拆这事推了这么久，估值大概多少？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 134 | rsc_gen_113 | 长江电力这一轮股息率跟电改时间表的关联有多大？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 135 | rsc_gen_114 | 智飞生物 15 价肺炎疫苗获批以后，对代理 HPV 下滑能补多少？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 136 | rsc_gen_115 | 京东 A 大客户订单这一轮波动，是不是意味着面板涨价周期见顶？ | disclosure_primary | human_authored | 其他 |  |
+| 137 | rsc_gen_116 | 中国神华煤矿扩产新批以后，吨煤完全成本变化大概是几个点？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 138 | rsc_gen_117 | 迈瑞医疗海外业务这一轮的本地化反馈具体怎么样？ | disclosure_primary | human_authored | 其他 |  |
+| 139 | rsc_gen_118 | 北方华创新订单这一轮的客户结构里，先进制程占比到什么水平了？ | disclosure_primary | human_authored | 其他 |  |
+| 140 | rsc_gen_119 | 药明康德海外订单这一轮的恢复节奏是怎样的？ | disclosure_primary | human_authored | 其他 |  |
+| 141 | rsc_gen_120 | 中国中免海南门店这一轮的恢复斜率怎么样？ | disclosure_primary | human_authored | 其他 |  |
+| 142 | rsc_gen_121 | 韦尔股份汽车 CIS 这一轮的占比变化？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 143 | rsc_gen_122 | 亿纬锂能大圆柱产能进度对应客户验证情况？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 144 | rsc_gen_123 | 科大讯飞大模型应用商业化这一轮落地节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 145 | rsc_gen_124 | 中国平安寿险新业务价值这一轮回暖，具体驱动因子是什么？ | disclosure_primary | human_authored | 其他 |  |
+| 146 | rsc_gen_125 | 兴业银行投行业务这一轮的收入结构与头部券商差距收窄到什么程度？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 147 | rsc_gen_126 | 中信证券自营盘这一轮的策略调整方向具体是什么？ | disclosure_primary | human_authored | 其他 |  |
+| 148 | rsc_gen_127 | 国泰君安并购重组业务线条这一轮的市占率变化有多大？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 149 | rsc_gen_128 | 海通证券国际业务这一轮的港股承销窗口期还能持续多久？ | disclosure_primary | human_authored | 其他 |  |
+| 150 | rsc_gen_129 | 浦发银行对公贷款不良率这一轮的压力测试结果大致怎样？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 151 | rsc_gen_130 | 民生银行小微贷款这一轮的资产质量走势表现如何？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 152 | rsc_gen_131 | 工商银行 AUM 这一轮的扩张节奏，对应的零售业务结构调整是什么？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 153 | rsc_gen_132 | 建设银行普惠金融这一轮的不良率跟同业差距是在收敛还是在放大？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 154 | rsc_gen_133 | 农业银行县域贷款这一轮增速，明显跑赢城商行的是哪一类客户？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 155 | rsc_gen_134 | 恒瑞医药创新药海外授权这一轮破纪录，对未来 BD 节奏预示了什么？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 156 | rsc_gen_135 | 百济神州 BTK 抑制剂海外销售这一轮的爬坡节奏具体什么样？ | disclosure_primary | human_authored | 其他 |  |
+| 157 | rsc_gen_136 | 复星医药这一轮剥离非核心资产，资本结构改善到什么程度？ | disclosure_primary | human_authored | 金融/央企/估值 |  |
+| 158 | rsc_gen_137 | 君实生物 PD-1 出海这一轮的合作伙伴敲定节奏怎么样了？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 159 | rsc_gen_138 | 云南白药中药业务这一轮的销售费用率改善节奏怎么看？ | disclosure_primary | human_authored | 其他 |  |
+| 160 | rsc_gen_139 | 片仔癀核心产品提价空间这一轮的反响到底有多强？ | disclosure_primary | human_authored | 其他 |  |
+| 161 | rsc_gen_140 | 长春高新生长激素这一轮在医保谈判前后的量价结构变化怎样？ | disclosure_primary | human_authored | 其他 |  |
+| 162 | rsc_gen_141 | 华东医药医美业务这一轮的渠道整合效果显现到什么程度？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 163 | rsc_gen_142 | 同仁堂品牌中药这一轮的渠道改革对终端动销的传导节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 164 | rsc_gen_143 | 通化东宝胰岛素这一轮集采续标价格水平相对上一轮的变化幅度？ | disclosure_primary | human_authored | 其他 |  |
+| 165 | rsc_gen_144 | 卓胜微射频前端这一轮的份额修复到什么水位了？ | disclosure_primary | human_authored | 其他 |  |
+| 166 | rsc_gen_145 | 圣邦股份模拟芯片这一轮的库存周期走到哪一步了？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 167 | rsc_gen_146 | 紫光国微特种 IC 这一轮的订单分布对应到下游哪些具体行业？ | disclosure_primary | human_authored | 其他 |  |
+| 168 | rsc_gen_147 | 沪电股份 AI 服务器 PCB 这一轮的客户认证节奏和价格？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 169 | rsc_gen_148 | 生益科技高频高速覆铜板这一轮的产能爬坡进度如何？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 170 | rsc_gen_149 | 兆易创新 NOR Flash 这一轮的价格触底节奏与历史对比？ | disclosure_primary | human_authored | 其他 |  |
+| 171 | rsc_gen_150 | 北京君正 DRAM 这一轮的产品结构升级是否触底？ | disclosure_primary | human_authored | 其他 |  |
+| 172 | rsc_gen_151 | 中微公司刻蚀设备这一轮在国内先进制程的订单确认节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 173 | rsc_gen_152 | 澜起科技 DDR5 渗透率这一轮的爬坡曲线相比 DDR4 是不是陡得多？ | disclosure_primary | human_authored | 其他 |  |
+| 174 | rsc_gen_153 | 闻泰科技安世半导体这一轮的中国销售占比变化？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 175 | rsc_gen_154 | 伊利股份液奶这一轮的需求复苏节奏与历史对比？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 176 | rsc_gen_155 | 双汇发展屠宰业务这一轮的产能利用率水平？ | disclosure_primary | human_authored | 其他 |  |
+| 177 | rsc_gen_156 | 海天味业渠道库存这一轮的恢复周期多长？ | disclosure_primary | human_authored | 其他 |  |
+| 178 | rsc_gen_157 | 安踏体育 FILA 品牌这一轮同店增长与 AMER 整合后的协同效应？ | disclosure_primary | human_authored | 其他 |  |
+| 179 | rsc_gen_158 | 海大集团饲料业务这一轮的市占率提升节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 180 | rsc_gen_159 | 顺丰控股同城业务这一轮的盈亏平衡节奏如何？ | disclosure_primary | human_authored | 其他 |  |
+| 181 | rsc_gen_160 | 上海机场国际客流这一轮的恢复斜率何时回到疫情前？ | disclosure_primary | human_authored | 其他 |  |
+| 182 | rsc_gen_161 | 三一重工海外销售这一轮的份额提升与挖机周期底部信号？ | disclosure_primary | human_authored | 其他 |  |
+| 183 | rsc_gen_162 | 中联重科高空作业平台这一轮的毛利率改善节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 184 | rsc_gen_163 | 徐工机械这一轮混改落地后，对海外渠道扩张的支撑力度？ | disclosure_primary | human_authored | 其他 |  |
+| 185 | rsc_gen_164 | 卫星化学 C3 产业链这一轮的产能扩张与利润弹性？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 186 | rsc_gen_165 | 恒力石化大化工项目这一轮的资本开支节奏与回报？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 187 | rsc_gen_166 | 荣盛石化炼化一体化这一轮的产能利用率与油品走势？ | disclosure_primary | human_authored | 其他 |  |
+| 188 | rsc_gen_167 | 龙佰集团钛白粉这一轮的价格弹性与下游补库节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 189 | rsc_gen_168 | 福耀玻璃北美工厂这一轮的产能爬坡进度？ | disclosure_primary | human_authored | 其他 |  |
+| 190 | rsc_gen_169 | 汇川技术工业自动化业务这一轮的份额提升节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 191 | rsc_gen_170 | 盐湖股份钾肥与锂盐业务这一轮的双轮驱动节奏？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 192 | rsc_gen_171 | 天齐锂业海外锂矿这一轮的经营杠杆释放节奏？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 193 | rsc_gen_172 | 赣锋锂业固态电池技术这一轮的产业化进展？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 194 | rsc_gen_173 | 华友钴业三元前驱体这一轮的盈利修复节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 195 | rsc_gen_174 | 洛阳钼业 TFM/KFM 这一轮的产能爬坡与铜价联动？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 196 | rsc_gen_175 | 江西铜业冶炼加工费这一轮的回升节奏与历史对比？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 197 | rsc_gen_176 | 山东黄金矿产金这一轮的成本曲线变化？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 198 | rsc_gen_177 | 中金黄金冶炼金占比这一轮的变化对盈利结构影响？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 199 | rsc_gen_178 | 中国铝业氧化铝价格这一轮的弹性传导节奏？ | disclosure_primary | human_authored | 资源/周期 |  |
+| 200 | rsc_gen_179 | 三峡能源海上风电这一轮的装机节奏与补贴退坡应对？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 201 | rsc_gen_180 | 龙源电力新能源装机这一轮的同比增速与电价传导？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 202 | rsc_gen_181 | 中国中车动车组招标这一轮的恢复节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 203 | rsc_gen_182 | 潍柴动力重卡发动机这一轮的销量与天然气重卡替代节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 204 | rsc_gen_183 | 中航西飞运输机交付节奏这一轮能不能跟上订单储备？ | disclosure_primary | human_authored | 其他 |  |
+| 205 | rsc_gen_184 | 航发动力军用发动机这一轮的产能爬坡节奏？ | disclosure_primary | human_authored | 其他 |  |
+| 206 | rsc_gen_185 | 海光信息 DCU 这一轮的客户拓展节奏与同业差距？ | disclosure_primary | human_authored | 其他 |  |
+| 207 | rsc_gen_186 | 中科曙光服务器业务这一轮的 AI 算力订单弹性？ | disclosure_primary | human_authored | 产业/科技/消费 |  |
+| 208 | rsc_gen_187 | 美联储 9 月降息预期反复，A 股哪些方向是直接 beta？ | event_primary | human_reviewed | 宏观/政策/地缘 | 边界 |
+| 209 | rsc_gen_188 | 美元降息节奏放慢，中远海控/招商轮船业绩弹性怎么走？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 210 | rsc_gen_189 | 美联储紧缩结束后，A 股消费股估值修复节奏如何？ | event_primary | human_reviewed | 产业/科技/消费 | 边界 |
+| 211 | rsc_gen_190 | 美联储维持高利率，对 A 股高股息龙头直接利好还是边际减弱？ | event_primary | human_reviewed | 金融/央企/估值 | 边界 |
+| 212 | rsc_gen_191 | 美国对华 301 关税再加码，对消费电子链订单冲击节奏？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 213 | rsc_gen_192 | 新一轮美国关税落地，对立讯精密/歌尔股份谁的弹性更大？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 214 | rsc_gen_193 | 美国新关税框架对纺织/家电 A 股出口板块弹性怎么排序？ | event_primary | human_reviewed | 产业/科技/消费 | 边界 |
+| 215 | rsc_gen_194 | 美国关税豁免清单调整，对跨境电商公司影响节奏怎么走？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 216 | rsc_gen_195 | 胡塞武装袭击再加码，对集运板块逻辑支撑还能持续多久？ | event_primary | human_reviewed | 红海/航运 | 矛盾->建议dual |
+| 217 | rsc_gen_196 | 红海绕航下，集装箱运价向 A 股集运板块业绩传导节奏？ | dual_primary | human_authored | 红海/航运 |  |
+| 218 | rsc_gen_197 | 红海局势进入常态化预期，航运板块估值要不要重估？ | event_primary | human_reviewed | 红海/航运 | 矛盾->建议dual |
+| 219 | rsc_gen_198 | 红海危机油价传导路径上，哪些油运标的弹性最直接？ | dual_primary | human_authored | 红海/航运 |  |
+| 220 | rsc_gen_199 | 光伏反内卷推进到现在，对组件厂商业绩弹性传导节奏？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 221 | rsc_gen_200 | 硅料联合限产，对隆基绿能/通威股份盈利能力差别多大？ | dual_primary | human_authored | 产业/科技/消费 | 用户query同构 |
+| 222 | rsc_gen_201 | 光伏自律协议落地，对二三线组件厂是利好还是利空？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 223 | rsc_gen_202 | 光伏反内卷对阳光电源/迈为股份订单确定性影响多大？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 224 | rsc_gen_203 | OPEC+ 减产这一轮被 price in 完后，A 股油气板块估值锚怎么走？ | event_primary | human_reviewed | 资源/周期 | 边界 |
+| 225 | rsc_gen_204 | OPEC+ 减产延长，对中国石油/中国海油业绩弹性的边际影响？ | dual_primary | human_authored | 资源/周期 |  |
+| 226 | rsc_gen_205 | OPEC+ 内部分歧加大，对油气板块情绪面冲击有多深？ | event_primary | human_reviewed | 资源/周期 | 边界 |
+| 227 | rsc_gen_206 | 台海军演常态化，对国产半导体设备公司订单确定性影响？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 228 | rsc_gen_207 | 台海紧张预期下，对中芯国际/北方华创逻辑支撑是利好还是利空？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 229 | rsc_gen_208 | 台海地缘风险加大，对 A 股军工板块短期博弈属性影响多大？ | dual_primary | human_reviewed | 产业/科技/消费 |  |
+| 230 | rsc_gen_209 | 中东冲突反复，对油运板块成本传导节奏怎么算？ | event_primary | human_reviewed | 红海/航运 |  |
+| 231 | rsc_gen_210 | 油价上行对中远海能这类油运标的业绩弹性有多大？ | dual_primary | human_authored | 红海/航运 |  |
+| 232 | rsc_gen_211 | 中东避险情绪升温，对 A 股黄金股估值修复节奏的影响？ | event_primary | human_reviewed | 资源/周期 | 边界 |
+| 233 | rsc_gen_212 | AI 算力紧缺传导下，对中际旭创/新易盛光模块公司订单弹性？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 234 | rsc_gen_213 | 英伟达 GPU 出口管制升级，对国产算力链公司估值修复节奏？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 235 | rsc_gen_214 | AI 算力周期下，对 IDC/温控设备公司订单节奏影响怎么走？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 236 | rsc_gen_215 | 人民币贬值压力加大，对出口型制造业公司汇兑收益节奏？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 237 | rsc_gen_216 | 人民币这一轮贬值，对家电出口板块业绩弹性有多大？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 238 | rsc_gen_217 | 人民币贬到 7.3 以上，对纺织出口板块公司业绩传导节奏？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 239 | rsc_gen_218 | 创新药 BD 出海纪录被刷新，对头部 biotech 估值修复节奏？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 240 | rsc_gen_219 | FDA 临床数据要求收紧，对国产创新药出海板块影响节奏？ | event_primary | human_reviewed | 产业/科技/消费 | 矛盾->建议dual |
+| 241 | rsc_gen_220 | 创新药授权金额上行，对药明康德这类 CXO 公司订单弹性？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 242 | rsc_gen_221 | 数据要素 X 试点扩容以后，对 A 股数据要素板块估值锚影响？ | event_primary | human_reviewed | 产业/科技/消费 | 矛盾->建议dual |
+| 243 | rsc_gen_222 | 公共数据授权运营推进，对数据要素板块龙头公司业绩预期？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 244 | rsc_gen_223 | 大基金三期投资落地，对半导体设备板块订单节奏影响？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 245 | rsc_gen_224 | 大基金投向材料端，对半导体材料板块龙头公司业绩弹性？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 246 | rsc_gen_225 | 注册制深化对券商投行业务收入结构影响有多大？ | dual_primary | human_authored | 金融/央企/估值 |  |
+| 247 | rsc_gen_226 | 注册制深化以后，对 A 股投行龙头业绩弹性传导节奏？ | dual_primary | human_authored | 金融/央企/估值 |  |
+| 248 | rsc_gen_227 | 央行 MLF 缩量续作，对银行板块净息差节奏影响怎么走？ | dual_primary | human_authored | 金融/央企/估值 |  |
+| 249 | rsc_gen_228 | MLF 操作利率不动，对银行股估值锚的影响有多大？ | event_primary | human_reviewed | 金融/央企/估值 | 矛盾->建议dual |
+| 250 | rsc_gen_229 | 苹果产业链往越南/印度迁移，对立讯精密这类代工厂影响节奏？ | dual_primary | human_authored | 其他 |  |
+| 251 | rsc_gen_230 | 苹果新机型国产化率提升，对 A 股供应链公司业绩弹性？ | dual_primary | human_authored | 其他 |  |
+| 252 | rsc_gen_231 | 稀土出口管制升级，对磁材板块龙头公司业绩弹性传导？ | dual_primary | human_authored | 资源/周期 |  |
+| 253 | rsc_gen_232 | 中国稀土出口管制加强，对北方稀土这类龙头公司业绩影响？ | dual_primary | human_authored | 资源/周期 |  |
+| 254 | rsc_gen_233 | 集成电路研发费用加计扣除新政，对北方华创研发开支影响？ | dual_primary | human_authored | 其他 |  |
+| 255 | rsc_gen_234 | 集成电路扶持新政出台，对半导体设备板块订单确定性影响？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 256 | rsc_gen_235 | 印尼镍矿出口政策又变，对电池厂上游成本传导节奏？ | event_primary | human_reviewed | 资源/周期 | 矛盾->建议dual |
+| 257 | rsc_gen_236 | 印尼镍矿出口配额调整，对 A 股锂电材料板块成本预期影响？ | event_primary | human_reviewed | 资源/周期 | 矛盾->建议dual |
+| 258 | rsc_gen_237 | 央行买卖国债落地以后，对券商自营盘业绩弹性传导有多快？ | dual_primary | human_authored | 金融/央企/估值 |  |
+| 259 | rsc_gen_238 | 央行二级市场买卖国债预期，对银行板块净息差影响有多大？ | dual_primary | human_authored | 金融/央企/估值 |  |
+| 260 | rsc_gen_239 | 消费税征收环节后移，对白酒板块龙头公司业绩影响？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 261 | rsc_gen_240 | 消费税后移改革，对化妆品板块龙头公司业绩弹性传导？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 262 | rsc_gen_241 | 低空经济政策利好下，对 A 股低空经济板块龙头业绩弹性？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 263 | rsc_gen_242 | 低空经济顶层文件落地，对无人机/通航板块订单节奏影响？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 264 | rsc_gen_243 | 人形机器人产业化进展加快，对 A 股零部件公司订单确定性？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 265 | rsc_gen_244 | 人形机器人量产预期升温，对国内供应链公司估值修复节奏？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 266 | rsc_gen_245 | 卫星互联网招标落地，对 A 股卫星制造/发射板块订单节奏？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 267 | rsc_gen_246 | 商业卫星发射节奏提速，对航天板块业绩弹性传导有多快？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 268 | rsc_gen_247 | 商业航天发射场落地，对 A 股火箭/卫星公司订单弹性？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 269 | rsc_gen_248 | 商业航天政策密集出台，对国内供应链公司订单确定性？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 270 | rsc_gen_249 | 黄金 ETF 大额申购持续，对 A 股黄金股估值修复节奏影响？ | event_primary | human_reviewed | 资源/周期 | 边界 |
+| 271 | rsc_gen_250 | 央行连续增持黄金储备，对 A 股黄金板块情绪面影响？ | event_primary | human_reviewed | 资源/周期 | 边界 |
+| 272 | rsc_gen_251 | 央企中国特色估值体系推进，对 A 股中字头估值修复节奏？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 273 | rsc_gen_252 | 国资委新一轮考核落地，对 A 股国企估值重塑节奏？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 274 | rsc_gen_253 | 退市新规执行这一年，对 A 股壳价值/小盘股估值压力节奏？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 275 | rsc_gen_254 | 退市新规叠加注册制深化，对券商投行业务分化影响多大？ | dual_primary | human_authored | 金融/央企/估值 |  |
+| 276 | rsc_gen_255 | 新质生产力相关产业目录扩容，对 A 股科技股估值修复影响？ | event_primary | human_reviewed | 其他 | 边界->建议dual |
+| 277 | rsc_gen_256 | 新质生产力文件落地，对 A 股人工智能/机器人板块业绩预期？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 278 | rsc_gen_257 | 锂价触底预期升温，对 A 股锂矿股业绩弹性传导节奏？ | dual_primary | human_authored | 资源/周期 |  |
+| 279 | rsc_gen_258 | 全球造船周期上行，对中国船舶等船厂公司业绩弹性有多大？ | dual_primary | human_authored | 其他 |  |
+| 280 | rsc_gen_259 | 猪价反转以后，对 A 股养殖链业绩弹性看哪一段？ | event_primary | human_reviewed | 产业/科技/消费 | 边界->建议dual |
+| 281 | rsc_gen_260 | 全球粮价上行叠加国内干旱，对 A 股种业股景气度推动多大？ | event_primary | human_reviewed | 其他 | 边界->建议dual |
+| 282 | rsc_gen_261 | 全国碳市场扩容到钢铁/水泥/铝，对相关板块业绩贡献有多大？ | dual_primary | human_authored | 资源/周期 |  |
+| 283 | rsc_gen_262 | IFRS17 切换以后，对 A 股险企估值逻辑重塑影响？ | dual_primary | human_authored | 金融/央企/估值 | 边界 |
+| 284 | rsc_gen_263 | 央企战新产业基金规模扩张，对 A 股并购重组生态影响？ | event_primary | human_reviewed | 金融/央企/估值 | 边界 |
+| 285 | rsc_gen_264 | 跨境理财通 2.0 落地，对南向资金额度使用节奏怎么走？ | event_primary | human_reviewed | 其他 | 边界 |
+| 286 | rsc_gen_265 | 上海自贸区本外币一体化政策落地，对跨国公司资金运作影响？ | event_primary | human_authored | 宏观/政策/地缘 | 合理 |
+| 287 | rsc_gen_266 | 北交所做市商扩容和转板机制，对小盘股流动性提振多大？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 288 | rsc_gen_267 | 海南自贸港加工增值免税落地，对企业实际利用率到位没有？ | event_primary | human_authored | 宏观/政策/地缘 | 合理 |
+| 289 | rsc_gen_268 | 国资委新一轮一利五率考核，对央企利润释放节奏影响多大？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 290 | rsc_gen_269 | 城中村改造推进到现在，对 A 股地产链条订单传导多大？ | event_primary | human_reviewed | 产业/科技/消费 | 边界->建议dual |
+| 291 | rsc_gen_270 | 全国统一大市场建设进入新阶段，对 A 股哪一类龙头是中长期利好？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 292 | rsc_gen_271 | 公募 REITs 新政落地，对 A 股基建股估值修复影响？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 293 | rsc_gen_272 | 金融稳定法推出，对 A 股金融板块风险定价影响？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 294 | rsc_gen_273 | 国家网络安全审查趋严，对信创板块订单确定性影响多大？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 295 | rsc_gen_274 | 医药集采常态化，对恒瑞医药等创新药企业绩弹性影响？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 296 | rsc_gen_275 | 互联网监管新规，对腾讯/阿里等平台公司业绩影响怎么走？ | dual_primary | human_authored | 宏观/政策/地缘 |  |
+| 297 | rsc_gen_276 | 央企新一轮重组，对 A 股相关上市公司影响节奏怎么走？ | dual_primary | human_authored | 金融/央企/估值 |  |
+| 298 | rsc_gen_277 | ETF 资金大额流入，对 A 股核心资产估值修复影响多大？ | event_primary | human_reviewed | 金融/央企/估值 | 边界->建议dual |
+| 299 | rsc_gen_278 | 汽车以旧换新政策落地，对 A 股整车股业绩弹性有多直接？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 300 | rsc_gen_279 | 房地产融资协调机制，对 A 股地产链融资节奏影响怎么走？ | dual_primary | human_authored | 产业/科技/消费 |  |
+| 301 | rsc_gen_280 | 家电以旧换新政策落地，对白电龙头业绩弹性传导有多快？ | dual_primary | human_authored | 产业/科技/消费 |  |
